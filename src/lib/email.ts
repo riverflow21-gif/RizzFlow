@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
 export interface PurchasedFileLink {
   productTitle: string;
@@ -8,7 +8,7 @@ export interface PurchasedFileLink {
 
 /**
  * Mengirimkan email berisi tautan unduhan produk digital ke alamat email pelanggan
- * segera setelah pembayaran QRIS terdeteksi lunas.
+ * secara gratis menggunakan akun Gmail resmi toko (Nodemailer SMTP).
  */
 export async function sendProductDeliveryEmail(params: {
   toEmail: string;
@@ -16,15 +16,25 @@ export async function sendProductDeliveryEmail(params: {
   totalPaid: number;
   files: PurchasedFileLink[];
 }): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.RESEND_FROM_EMAIL || 'RizzFlow <onboarding@resend.dev>';
+  const gmailUser = process.env.GMAIL_USER;
+  // Hapus spasi jika pemilik toko tidak sengaja menyalin 16 huruf App Password beserta spasinya
+  const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
 
-  if (!apiKey) {
-    console.warn('RESEND_API_KEY belum diisi di .env.local. Email tidak dikirim.');
+  if (!gmailUser || !gmailAppPassword) {
+    console.warn(
+      'GMAIL_USER atau GMAIL_APP_PASSWORD belum diisi di .env.local. Email tidak dapat dikirim.'
+    );
     return;
   }
 
-  const resend = new Resend(apiKey);
+  // Buat koneksi pengirim melalui server resmi Gmail
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: gmailUser,
+      pass: gmailAppPassword,
+    },
+  });
 
   const fileListHtml = params.files
     .map(
@@ -61,14 +71,10 @@ export async function sendProductDeliveryEmail(params: {
     </div>
   `;
 
-  const { error } = await resend.emails.send({
-    from: fromEmail,
-    to: [params.toEmail],
+  await transporter.sendMail({
+    from: `"RizzFlow" <${gmailUser}>`,
+    to: params.toEmail,
     subject: `[RizzFlow] File Produk Digitalmu Siap Diunduh (#${params.invoiceNumber})`,
     html: htmlContent,
   });
-
-  if (error) {
-    throw new Error(`Gagal mengirim email Resend: ${error.message}`);
-  }
 }
