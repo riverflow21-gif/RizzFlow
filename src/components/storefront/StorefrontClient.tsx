@@ -41,7 +41,7 @@ export default function StorefrontClient({
 }: StorefrontClientProps) {
   const router = useRouter();
 
-  // State data produk & kategori yang selalu disegarkan otomatis saat halaman dibuka di HP/Laptop
+  // State data produk & kategori
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
@@ -81,6 +81,19 @@ export default function StorefrontClient({
     refreshStorefrontData();
   }, []);
 
+  // KUNCI SCROLL HALAMAN BELAKANG saat Detail Produk atau Keranjang sedang dibuka
+  useEffect(() => {
+    if (activeProduct || isCartOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [activeProduct, isCartOpen]);
+
   // Muat isi keranjang dari localStorage
   useEffect(() => {
     try {
@@ -105,7 +118,6 @@ export default function StorefrontClient({
     }
   };
 
-  // Fungsi menambahkan produk ke keranjang (menyimpan gambar sampul pertama agar tampil rapi di Checkout)
   const handleAddToCart = (product: Product) => {
     const primaryThumb = parseThumbnails(product.thumbnail_url)[0] || product.thumbnail_url;
     const normalizedProduct: Product = {
@@ -390,7 +402,7 @@ export default function StorefrontClient({
         )}
       </AnimatePresence>
 
-      {/* Modal Detail Produk dengan Galeri Banyak Thumbnail */}
+      {/* Modal Detail Produk (Tinggi 2/3 Layar, Gambar Ikut Ter-scroll, & Belakang Terkunci) */}
       <AnimatePresence>
         {activeProduct && (
           <motion.div
@@ -398,113 +410,114 @@ export default function StorefrontClient({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setActiveProduct(null)}
-            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overscroll-contain touch-none"
           >
             <motion.div
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 260 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-xl max-h-[90vh] flex flex-col"
+              className="relative bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl h-[66vh] sm:h-[68vh] flex flex-col touch-auto"
             >
-              <div className="relative aspect-[16/10] bg-[#F8FAFC] border-b border-slate-100">
-                <img
-                  src={activeProductImages[activeImageIndex] || ''}
-                  alt={activeProduct.title}
-                  className="w-full h-full object-cover"
-                />
+              {/* Indikator Garis Handle di Atas & Tombol Tutup (X) yang Selalu Menempel */}
+              <div className="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mt-2.5 mb-1 shrink-0 sm:hidden" />
+              <button
+                type="button"
+                onClick={() => setActiveProduct(null)}
+                className="absolute top-3.5 right-3.5 z-20 w-9 h-9 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white border border-slate-200/70"
+                aria-label="Tutup Detail Produk"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-                {/* Navigasi Geser Gambar Jika Thumbnail Lebih dari 1 */}
+              {/* SATU WADAH SCROLL TERPADU: Gambar Produk + Galeri + Judul + Deskripsi */}
+              <div className="flex-1 overflow-y-auto overscroll-contain">
+                {/* Gambar Sampul yang Ikut Ter-scroll Saat Digeser ke Bawah */}
+                <div className="relative aspect-[16/10] bg-[#F8FAFC] border-b border-slate-100">
+                  <img
+                    src={activeProductImages[activeImageIndex] || ''}
+                    alt={activeProduct.title}
+                    className="w-full h-full object-cover"
+                  />
+
+                  {activeProductImages.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveImageIndex((prev) =>
+                            prev === 0 ? activeProductImages.length - 1 : prev - 1
+                          )
+                        }
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      <span className="absolute left-3 bottom-3 px-2.5 py-1 rounded-full bg-slate-900/75 text-white text-xs font-bold">
+                        {activeImageIndex + 1} / {activeProductImages.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveImageIndex((prev) =>
+                            prev === activeProductImages.length - 1 ? 0 : prev + 1
+                          )
+                        }
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Deretan Thumbnail Kecil Jika Gambar Lebih dari 1 */}
                 {activeProductImages.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveImageIndex((prev) =>
-                          prev === 0 ? activeProductImages.length - 1 : prev - 1
-                        )
-                      }
-                      className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveImageIndex((prev) =>
-                          prev === activeProductImages.length - 1 ? 0 : prev + 1
-                        )
-                      }
-                      className="absolute right-14 top-3 px-2.5 py-1 rounded-full bg-slate-900/75 text-white text-xs font-bold"
-                    >
-                      {activeImageIndex + 1} / {activeProductImages.length}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveImageIndex((prev) =>
-                          prev === activeProductImages.length - 1 ? 0 : prev + 1
-                        )
-                      }
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </>
+                  <div className="flex gap-2 px-5 pt-3 overflow-x-auto no-scrollbar">
+                    {activeProductImages.map((imgUrl, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setActiveImageIndex(idx)}
+                        className={`w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 transition-all ${
+                          activeImageIndex === idx
+                            ? 'border-[#10B981] scale-105'
+                            : 'border-slate-200 opacity-70'
+                        }`}
+                      >
+                        <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setActiveProduct(null)}
-                  className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Deretan Thumbnail Kecil Jika Gambar Lebih dari 1 */}
-              {activeProductImages.length > 1 && (
-                <div className="flex gap-2 px-5 pt-3 overflow-x-auto no-scrollbar">
-                  {activeProductImages.map((imgUrl, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setActiveImageIndex(idx)}
-                      className={`w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 transition-all ${
-                        activeImageIndex === idx
-                          ? 'border-[#10B981] scale-105'
-                          : 'border-slate-200 opacity-70'
-                      }`}
-                    >
-                      <img src={imgUrl} alt="" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
-                {activeProduct.badge && (
-                  <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669]">
-                    {activeProduct.badge}
-                  </span>
-                )}
-                <h3 className="text-xl font-extrabold text-[#0F172A] break-words">
-                  {activeProduct.title}
-                </h3>
-                <div className="text-2xl font-extrabold text-[#10B981]">
-                  Rp{activeProduct.price.toLocaleString('id-ID')}
-                </div>
-                <div className="pt-2 border-t border-slate-100">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2">
-                    Deskripsi Produk Digital
-                  </h4>
-                  <p className="text-sm text-[#0F172A] whitespace-pre-line leading-relaxed break-words">
-                    {activeProduct.description}
-                  </p>
+                {/* Rincian Judul, Harga, dan Deskripsi Produk */}
+                <div className="p-5 sm:p-6 space-y-3.5">
+                  {activeProduct.badge && (
+                    <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669]">
+                      {activeProduct.badge}
+                    </span>
+                  )}
+                  <h3 className="text-xl font-extrabold text-[#0F172A] break-words">
+                    {activeProduct.title}
+                  </h3>
+                  <div className="text-2xl font-extrabold text-[#10B981]">
+                    Rp{activeProduct.price.toLocaleString('id-ID')}
+                  </div>
+                  <div className="pt-3 border-t border-slate-100">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2">
+                      Deskripsi Produk Digital
+                    </h4>
+                    <p className="text-sm text-[#0F172A] whitespace-pre-line leading-relaxed break-words">
+                      {activeProduct.description}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-4 sm:p-5 border-t border-slate-100 bg-[#F8FAFC] flex gap-3">
+              {/* Tombol Bawah yang Selalu Siap Diketuk */}
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-[#F8FAFC] shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -512,7 +525,7 @@ export default function StorefrontClient({
                     setActiveProduct(null);
                     setIsCartOpen(true);
                   }}
-                  className="flex-1 py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-sm transition-colors shadow-sm"
+                  className="w-full py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-sm transition-colors shadow-sm"
                 >
                   Tambah ke Keranjang & Lihat
                 </button>
@@ -530,7 +543,7 @@ export default function StorefrontClient({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsCartOpen(false)}
-            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex justify-end"
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex justify-end overscroll-contain"
           >
             <motion.div
               initial={{ x: '100%' }}
@@ -554,7 +567,7 @@ export default function StorefrontClient({
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4">
                 {cart.length === 0 ? (
                   <div className="text-center py-16">
                     <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-3 stroke-[1.5]" />
