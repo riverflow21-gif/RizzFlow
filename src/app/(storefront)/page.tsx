@@ -3,8 +3,11 @@ import { supabase } from '@/lib/supabase';
 import StorefrontClient from '@/components/storefront/StorefrontClient';
 import { Category, Product, StoreSettings } from '@/types';
 
+// Memastikan Vercel selalu menampilkan produk terbaru secara real-time tanpa cache lama
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function StorefrontHomePage() {
-  // Ambil pengaturan toko, daftar kategori, dan produk yang aktif secara paralel
   const [settingsRes, categoriesRes, productsRes] = await Promise.all([
     supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
     supabase.from('categories').select('*').order('name', { ascending: true }),

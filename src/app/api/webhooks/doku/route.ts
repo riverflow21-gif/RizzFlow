@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin, generateProductSignedUrl } from '@/lib/supabase';
+import { getSupabaseAdmin, buildProductDeliveryItems } from '@/lib/supabase';
 import { verifyDokuWebhookSignature } from '@/lib/doku';
 import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
 import { DokuWebhookPayload, Order, OrderItem } from '@/types';
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const requestTimestampHeader = request.headers.get('Request-Timestamp') || '';
     const signatureHeader = request.headers.get('Signature') || '';
 
-    // 1. Verifikasi Signature keamanan dari DOKU agar tidak bisa ditembak oleh pihak luar
+    // 1. Verifikasi Signature keamanan dari DOKU
     const isValidSignature = verifyDokuWebhookSignature({
       clientIdHeader,
       requestIdHeader,
@@ -34,7 +34,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Nomor invoice tidak ditemukan pada payload.' }, { status: 400 });
     }
 
-    // Hanya proses jika status pembayaran dari DOKU adalah SUCCESS atau PAID
     if (transactionStatus !== 'SUCCESS' && transactionStatus !== 'PAID') {
       return NextResponse.json({ message: `Status ${transactionStatus} diabaikan.` });
     }
@@ -54,7 +53,6 @@ export async function POST(request: Request) {
 
     const order = orderData as Order;
 
-    // Jika sebelumnya sudah berstatus PAID, hentikan agar email tidak terkirim dua kali
     if (order.payment_status === 'PAID') {
       return NextResponse.json({ message: 'Pesanan sudah berstatus PAID sebelumnya.' });
     }
@@ -81,7 +79,7 @@ export async function POST(request: Request) {
     const orderItems = (orderItemsData || []) as OrderItem[];
     const fileLinks: PurchasedFileLink[] = [];
 
-    // 5. Buat tautan unduhan aman (Signed URL) untuk setiap file produk dari bucket privat
+    // 5. Kumpulkan semua file unduhan (Signed URL) dan link eksternal (Google Drive) untuk tiap produk
     for (const item of orderItems) {
       if (!item.product_id) continue;
 
@@ -93,19 +91,19 @@ export async function POST(request: Request) {
 
       if (productData?.file_path) {
         try {
-          const signedUrl = await generateProductSignedUrl(productData.file_path);
-          fileLinks.push({
+          const deliveryItems = await buildProductDeliveryItems({
             productTitle: item.product_title,
             quantity: item.quantity,
-            signedDownloadUrl: signedUrl,
+            rawFilePath: productData.file_path,
           });
-        } catch (signedErr) {
-          console.error('Gagal membuat Signed URL:', signedErr);
+          fileLinks.push(...deliveryItems);
+        } catch (err) {
+          console.error('Gagal menyiapkan link produk:', err);
         }
       }
     }
 
-    // 6. Kirimkan email otomatis berisi tombol unduhan ke alamat email pelanggan
+    // 6. Kirimkan email otomatis ke pelanggan
     if (fileLinks.length > 0) {
       await sendProductDeliveryEmail({
         toEmail: order.customer_email,

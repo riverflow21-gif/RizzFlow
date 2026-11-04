@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin, generateProductSignedUrl } from '@/lib/supabase';
+import { getSupabaseAdmin, buildProductDeliveryItems } from '@/lib/supabase';
 import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
 import { Order, OrderItem } from '@/types';
 
@@ -9,7 +9,6 @@ interface ResendEmailRequestBody {
 
 export async function POST(request: Request) {
   try {
-    // 1. Pastikan permintaan ini datang dari Admin yang sedang login (memiliki token)
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '').trim();
 
@@ -30,7 +29,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Ambil ID pesanan yang ingin dikirim ulang emailnya
     const body = (await request.json()) as ResendEmailRequestBody;
     const orderId = body.order_id;
 
@@ -50,7 +48,6 @@ export async function POST(request: Request) {
 
     const order = orderData as Order;
 
-    // 3. Ambil daftar item produk pada pesanan tersebut
     const { data: orderItemsData } = await supabaseAdmin
       .from('order_items')
       .select('*')
@@ -59,7 +56,6 @@ export async function POST(request: Request) {
     const orderItems = (orderItemsData || []) as OrderItem[];
     const fileLinks: PurchasedFileLink[] = [];
 
-    // 4. Buat ulang tautan unduhan baru (Signed URL) yang berlaku 7 hari ke depan
     for (const item of orderItems) {
       if (!item.product_id) continue;
 
@@ -70,23 +66,22 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (productData?.file_path) {
-        const signedUrl = await generateProductSignedUrl(productData.file_path);
-        fileLinks.push({
+        const deliveryItems = await buildProductDeliveryItems({
           productTitle: item.product_title,
           quantity: item.quantity,
-          signedDownloadUrl: signedUrl,
+          rawFilePath: productData.file_path,
         });
+        fileLinks.push(...deliveryItems);
       }
     }
 
     if (fileLinks.length === 0) {
       return NextResponse.json(
-        { error: 'File produk untuk pesanan ini tidak ditemukan di penyimpanan.' },
+        { error: 'File atau link produk untuk pesanan ini tidak ditemukan.' },
         { status: 400 }
       );
     }
 
-    // 5. Kirimkan email ke alamat email pelanggan
     await sendProductDeliveryEmail({
       toEmail: order.customer_email,
       invoiceNumber: order.invoice_number,
