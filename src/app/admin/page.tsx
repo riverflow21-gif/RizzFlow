@@ -152,6 +152,8 @@ export default function AdminDashboardPage() {
   const [productLinks, setProductLinks] = useState([''] as string[]);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null as Product | null);
+  const [adminProductSearch, setAdminProductSearch] = useState('');
 
   // State Input Keterangan & Detail Akun Langganan
   const [subNotesDraft, setSubNotesDraft] = useState(
@@ -437,20 +439,68 @@ export default function AdminDashboardPage() {
       prev.length > 1 ? prev.filter((_, idx) => idx !== index) : ['']
     );
 
+  // Fungsi mengisi form saat tombol "Edit" pada daftar produk diklik
+  const handleStartEditProduct = (product: Product) => {
+    const deliverables = parseProductDeliverables(product.file_path);
+    setEditingProduct(product);
+    setProdSaleType(deliverables.product_type || 'INSTAN');
+    setProdTitle(product.title);
+    setProdCategoryId(product.category_id || '');
+    setProdPrice(String(product.price));
+    setProdOriginalPrice(
+      deliverables.original_price ? String(deliverables.original_price) : ''
+    );
+    setProdBadge(product.badge || '');
+    setProdDesc(product.description);
+    setProductLinks(
+      deliverables.links && deliverables.links.length > 0
+        ? deliverables.links
+        : ['']
+    );
+    setThumbnailFiles([]);
+    setDigitalFiles([]);
+    setFileInputKey((prev) => prev + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Fungsi membatalkan mode Edit dan mengosongkan kembali form
+  const handleCancelEditProduct = () => {
+    setEditingProduct(null);
+    setProdSaleType('INSTAN');
+    setProdTitle('');
+    setProdPrice('');
+    setProdOriginalPrice('');
+    setProdBadge('');
+    setProdDesc('');
+    setThumbnailFiles([]);
+    setDigitalFiles([]);
+    setProductLinks(['']);
+    setFileInputKey((prev) => prev + 1);
+  };
+
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     const validLinks = productLinks
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    if (thumbnailFiles.length === 0) {
+    const existingDeliverables = editingProduct
+      ? parseProductDeliverables(editingProduct.file_path)
+      : null;
+
+    // Jika tambah produk baru (bukan edit), wajib pilih minimal 1 gambar thumbnail
+    if (!editingProduct && thumbnailFiles.length === 0) {
       showMessage('error', 'Harap pilih minimal 1 Gambar Sampul (Thumbnail).');
       return;
     }
 
+    const hasExistingFiles =
+      existingDeliverables && existingDeliverables.files.length > 0;
+
     if (
       prodSaleType === 'INSTAN' &&
       digitalFiles.length === 0 &&
+      !hasExistingFiles &&
       validLinks.length === 0
     ) {
       showMessage(
@@ -463,95 +513,116 @@ export default function AdminDashboardPage() {
     setIsSavingProduct(true);
     try {
       const timestamp = Date.now();
-      const uploadedThumbUrls: string[] = [];
-      const uploadedFilePaths: string[] = [];
+      let thumbnailPayload = editingProduct ? editingProduct.thumbnail_url : '';
+      let uploadedFilePaths: string[] = existingDeliverables
+        ? existingDeliverables.files
+        : [];
 
-      for (let i = 0; i < thumbnailFiles.length; i++) {
-        const file = thumbnailFiles[i];
-        const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const thumbPath = `thumb_${timestamp}_${i}_${cleanName}`;
+      // Jika Admin memilih gambar thumbnail baru, unggah ke Supabase Storage
+      if (thumbnailFiles.length > 0) {
+        const uploadedThumbUrls: string[] = [];
+        for (let i = 0; i < thumbnailFiles.length; i++) {
+          const file = thumbnailFiles[i];
+          const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const thumbPath = `thumb_${timestamp}_${i}_${cleanName}`;
 
-        const { error: thumbErr } = await supabase.storage
-          .from('product-thumbnails')
-          .upload(thumbPath, file, { upsert: false });
+          const { error: thumbErr } = await supabase.storage
+            .from('product-thumbnails')
+            .upload(thumbPath, file, { upsert: false });
 
-        if (thumbErr) {
-          throw new Error(`Gagal upload gambar: ${thumbErr.message}`);
+          if (thumbErr) {
+            throw new Error(`Gagal upload gambar: ${thumbErr.message}`);
+          }
+
+          const { data: publicUrlData } = supabase.storage
+            .from('product-thumbnails')
+            .getPublicUrl(thumbPath);
+
+          uploadedThumbUrls.push(publicUrlData.publicUrl);
         }
 
-        const { data: publicUrlData } = supabase.storage
-          .from('product-thumbnails')
-          .getPublicUrl(thumbPath);
-
-        uploadedThumbUrls.push(publicUrlData.publicUrl);
+        thumbnailPayload =
+          uploadedThumbUrls.length === 1
+            ? uploadedThumbUrls[0]
+            : JSON.stringify(uploadedThumbUrls);
       }
 
-      for (let j = 0; j < digitalFiles.length; j++) {
-        const dFile = digitalFiles[j];
-        const cleanName = dFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const digitalPath = `file_${timestamp}_${j}_${cleanName}`;
+      // Jika Admin memilih file produk baru, unggah ke Supabase Storage
+      if (digitalFiles.length > 0) {
+        const newFilePaths: string[] = [];
+        for (let j = 0; j < digitalFiles.length; j++) {
+          const dFile = digitalFiles[j];
+          const cleanName = dFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const digitalPath = `file_${timestamp}_${j}_${cleanName}`;
 
-        const { error: fileErr } = await supabase.storage
-          .from('digital-products')
-          .upload(digitalPath, dFile, { upsert: false });
+          const { error: fileErr } = await supabase.storage
+            .from('digital-products')
+            .upload(digitalPath, dFile, { upsert: false });
 
-        if (fileErr) {
-          throw new Error(`Gagal upload file: ${fileErr.message}`);
+          if (fileErr) {
+            throw new Error(`Gagal upload file: ${fileErr.message}`);
+          }
+          newFilePaths.push(digitalPath);
         }
-        uploadedFilePaths.push(digitalPath);
+        uploadedFilePaths = newFilePaths;
       }
-
-      const thumbnailPayload =
-        uploadedThumbUrls.length === 1
-          ? uploadedThumbUrls[0]
-          : JSON.stringify(uploadedThumbUrls);
 
       const numericOriginalPrice = prodOriginalPrice
         ? Math.max(0, Number(prodOriginalPrice) || 0)
         : null;
 
       const deliverablesPayload = JSON.stringify({
-        files: uploadedFilePaths,
-        links: validLinks,
+        files: prodSaleType === 'INSTAN' ? uploadedFilePaths : [],
+        links: prodSaleType === 'INSTAN' ? validLinks : [],
         original_price: numericOriginalPrice,
         product_type: prodSaleType,
       });
 
-      const { error: insertErr } = await supabase.from('products').insert({
-        title: prodTitle.trim(),
-        category_id: prodCategoryId || null,
-        price: Math.max(0, Number(prodPrice) || 0),
-        badge: prodBadge.trim() ? prodBadge.trim() : null,
-        description: prodDesc.trim(),
-        thumbnail_url: thumbnailPayload,
-        file_path: deliverablesPayload,
-        is_active: true,
-      });
+      if (editingProduct) {
+        // Simpan Perubahan Produk yang Sedang Diedit
+        const { error: updateErr } = await supabase
+          .from('products')
+          .update({
+            title: prodTitle.trim(),
+            category_id: prodCategoryId || null,
+            price: Math.max(0, Number(prodPrice) || 0),
+            badge: prodBadge.trim() ? prodBadge.trim() : null,
+            description: prodDesc.trim(),
+            thumbnail_url: thumbnailPayload,
+            file_path: deliverablesPayload,
+          })
+          .eq('id', editingProduct.id);
 
-      if (insertErr) throw new Error(insertErr.message);
+        if (updateErr) throw new Error(updateErr.message);
+        showMessage('success', 'Perubahan produk berhasil disimpan!');
+      } else {
+        // Simpan Produk Baru
+        const { error: insertErr } = await supabase.from('products').insert({
+          title: prodTitle.trim(),
+          category_id: prodCategoryId || null,
+          price: Math.max(0, Number(prodPrice) || 0),
+          badge: prodBadge.trim() ? prodBadge.trim() : null,
+          description: prodDesc.trim(),
+          thumbnail_url: thumbnailPayload,
+          file_path: deliverablesPayload,
+          is_active: true,
+        });
 
-      setProdTitle('');
-      setProdPrice('');
-      setProdOriginalPrice('');
-      setProdBadge('');
-      setProdDesc('');
-      setThumbnailFiles([]);
-      setDigitalFiles([]);
-      setProductLinks(['']);
-      setFileInputKey((prev) => prev + 1);
+        if (insertErr) throw new Error(insertErr.message);
+        showMessage('success', 'Produk baru berhasil disimpan!');
+      }
 
+      handleCancelEditProduct();
       await fetchAllAdminData();
-      showMessage('success', 'Produk baru berhasil disimpan!');
     } catch (err) {
       showMessage(
         'error',
-        err instanceof Error ? err.message : 'Gagal menambah produk.'
+        err instanceof Error ? err.message : 'Gagal menyimpan produk.'
       );
     } finally {
       setIsSavingProduct(false);
     }
   };
-
   const handleToggleProductActive = async (product: Product) => {
     const { error } = await supabase
       .from('products')
@@ -1242,12 +1313,31 @@ export default function AdminDashboardPage() {
         {activeTab === 'products' && (
           <div className="space-y-8">
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200">
-              <h2 className="text-lg font-extrabold text-[#0F172A] mb-1">
-                Tambah Produk Baru (File Instan / Produk Langganan)
-              </h2>
-              <p className="text-xs text-[#64748B] mb-5">
-                Pilih apakah produk ini berupa File/Link Instan atau Produk Tipe Langganan (Kode Antrian 4 Angka).
-              </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-[#0F172A]">
+                    {editingProduct
+                      ? `Edit Produk: ${editingProduct.title}`
+                      : 'Tambah Produk Baru (File Instan / Produk Langganan)'}
+                  </h2>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    {editingProduct
+                      ? 'Ubah rincian di bawah ini lalu klik Simpan Perubahan. Kosongkan input gambar/file jika tidak ingin mengganti gambar/file lama.'
+                      : 'Pilih apakah produk ini berupa File/Link Instan atau Produk Tipe Langganan.'}
+                  </p>
+                </div>
+
+                {editingProduct && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditProduct}
+                    className="self-start sm:self-center px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-[#EF4444] text-xs font-extrabold inline-flex items-center gap-1.5 shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Batal Edit</span>
+                  </button>
+                )}
+              </div>
 
               <form onSubmit={handleCreateProduct} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#F8FAFC] p-2 rounded-xl border border-slate-200">
@@ -1271,7 +1361,7 @@ export default function AdminDashboardPage() {
                         : 'py-2.5 px-3 rounded-lg text-xs font-extrabold transition-all text-[#64748B] hover:text-[#0F172A]'
                     }
                   >
-                    👑 Produk Tipe Langganan (Sistem Cek Stok 4 Angka)
+                    👑 Produk Tipe Langganan (Opsi WA/Tele &amp; Kode 4 Angka)
                   </button>
                 </div>
 
@@ -1372,7 +1462,8 @@ export default function AdminDashboardPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div className="p-4 rounded-xl bg-[#F8FAFC] border border-dashed border-slate-300 min-w-0">
                     <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                      1. Pilih Gambar Sampul / Thumbnail (Bisa lebih dari 1) *
+                      1. Pilih Gambar Sampul / Thumbnail (Bisa lebih dari 1){' '}
+                      {editingProduct ? '(Opsional saat Edit)' : '*'}
                     </label>
                     <input
                       key={`thumb-${fileInputKey}`}
@@ -1388,7 +1479,7 @@ export default function AdminDashboardPage() {
                     />
                     {thumbnailFiles.length > 0 && (
                       <p className="text-[11px] font-bold text-[#059669] mt-2 break-all">
-                        ✓ {thumbnailFiles.length} gambar dipilih
+                        ✓ {thumbnailFiles.length} gambar baru dipilih
                       </p>
                     )}
                   </div>
@@ -1411,7 +1502,7 @@ export default function AdminDashboardPage() {
                       />
                       {digitalFiles.length > 0 && (
                         <p className="text-[11px] font-bold text-[#059669] mt-2 break-all">
-                          ✓ {digitalFiles.length} file dipilih
+                          ✓ {digitalFiles.length} file baru dipilih
                         </p>
                       )}
                     </div>
@@ -1419,7 +1510,7 @@ export default function AdminDashboardPage() {
                     <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-col justify-center">
                       <strong>👑 Mode Produk Langganan Aktif:</strong>
                       <p className="mt-1">
-                        Kamu tidak perlu mengunggah file di awal. Saat ada pembeli yang mengambil Kode 4 Angka, kamu bisa mengonfirmasi stok dan mengirimkan detail akunnya melalui menu <strong>Layanan Langganan</strong>.
+                        Saat pelanggan memilih produk ini di toko, pelanggan langsung diberi pilihan untuk <strong>Chat WA / Telegram Admin</strong> atau mengambil <strong>Kode Antrian 4 Angka</strong>.
                       </p>
                     </div>
                   )}
@@ -1469,122 +1560,179 @@ export default function AdminDashboardPage() {
                   </div>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={isSavingProduct}
-                  className="px-5 py-3 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-sm inline-flex items-center gap-2 transition-colors"
-                >
-                  {isSavingProduct ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Mengunggah &amp; Menyimpan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      <span>Simpan &amp; Terbitkan Produk</span>
-                    </>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingProduct}
+                    className="px-5 py-3 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-sm inline-flex items-center gap-2 transition-colors"
+                  >
+                    {isSavingProduct ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Menyimpan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>
+                          {editingProduct
+                            ? 'Simpan Perubahan Produk'
+                            : 'Simpan & Terbitkan Produk'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  {editingProduct && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditProduct}
+                      className="px-4 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0F172A] font-bold text-sm"
+                    >
+                      Batal
+                    </button>
                   )}
-                </button>
+                </div>
               </form>
             </div>
 
-            <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200">
-              <h3 className="text-base font-extrabold text-[#0F172A] mb-4">
-                Daftar Katalog Produk ({products.length})
-              </h3>
+            {/* Daftar Katalog Produk Dilengkapi Kolom Pencarian & Tombol Edit */}
+            <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h3 className="text-base font-extrabold text-[#0F172A]">
+                  Daftar Katalog Produk ({products.length})
+                </h3>
+
+                {/* Kolom Pencarian Produk di Halaman Admin */}
+                <div className="relative w-full sm:w-72">
+                  <input
+                    type="text"
+                    value={adminProductSearch}
+                    onChange={(e) => setAdminProductSearch(e.target.value)}
+                    placeholder="Cari nama produk untuk diedit..."
+                    className="w-full pl-3.5 pr-8 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs text-[#0F172A] focus:outline-none focus:border-[#10B981]"
+                  />
+                  {adminProductSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setAdminProductSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {products.length === 0 ? (
                 <p className="text-sm text-[#64748B] py-6 text-center">
                   Belum ada produk.
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {products.map((prod) => {
-                    const thumbs = parseThumbnails(prod.thumbnail_url);
-                    const deliverables = parseProductDeliverables(
-                      prod.file_path
-                    );
-                    const isSub = deliverables.product_type === 'LANGGANAN';
+                  {products
+                    .filter((p) => {
+                      const q = adminProductSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        p.title.toLowerCase().includes(q) ||
+                        p.description.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((prod) => {
+                      const thumbs = parseThumbnails(prod.thumbnail_url);
+                      const deliverables = parseProductDeliverables(
+                        prod.file_path
+                      );
+                      const isSub = deliverables.product_type === 'LANGGANAN';
 
-                    return (
-                      <div
-                        key={prod.id}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 min-w-0"
-                      >
-                        <div className="flex items-start gap-3.5 min-w-0 flex-1">
-                          <img
-                            src={thumbs[0] || ''}
-                            alt={prod.title}
-                            className="w-14 h-14 rounded-lg object-cover bg-white border border-slate-200 shrink-0"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span
-                                className={
-                                  isSub
-                                    ? 'px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800'
-                                    : 'px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-[#ECFDF5] text-[#059669]'
-                                }
-                              >
-                                {isSub ? '👑 Langganan' : '⚡ Instan'}
-                              </span>
-                              <h4 className="font-bold text-sm text-[#0F172A] break-words">
-                                {prod.title}
-                              </h4>
-                              {!prod.is_active && (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 text-slate-700">
-                                  Disembunyikan
+                      return (
+                        <div
+                          key={prod.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 min-w-0"
+                        >
+                          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                            <img
+                              src={thumbs[0] || ''}
+                              alt={prod.title}
+                              className="w-14 h-14 rounded-lg object-cover bg-white border border-slate-200 shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span
+                                  className={
+                                    isSub
+                                      ? 'px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800'
+                                      : 'px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-[#ECFDF5] text-[#059669]'
+                                  }
+                                >
+                                  {isSub ? '👑 Langganan' : '⚡ Instan'}
                                 </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-xs font-extrabold text-[#10B981]">
-                                Rp{prod.price.toLocaleString('id-ID')}
-                              </span>
-                              {deliverables.original_price &&
-                                deliverables.original_price > prod.price && (
-                                  <span className="text-[11px] text-[#64748B] line-through">
-                                    Rp
-                                    {deliverables.original_price.toLocaleString(
-                                      'id-ID'
-                                    )}
+                                <h4 className="font-bold text-sm text-[#0F172A] break-words">
+                                  {prod.title}
+                                </h4>
+                                {!prod.is_active && (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 text-slate-700">
+                                    Disembunyikan
                                   </span>
                                 )}
+                              </div>
+
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-xs font-extrabold text-[#10B981]">
+                                  Rp{prod.price.toLocaleString('id-ID')}
+                                </span>
+                                {deliverables.original_price &&
+                                  deliverables.original_price > prod.price && (
+                                    <span className="text-[11px] text-[#64748B] line-through">
+                                      Rp
+                                      {deliverables.original_price.toLocaleString(
+                                        'id-ID'
+                                      )}
+                                    </span>
+                                  )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProductActive(prod)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold inline-flex items-center gap-1.5"
-                          >
-                            {prod.is_active ? (
-                              <>
-                                <EyeOff className="w-3.5 h-3.5 text-[#64748B]" />
-                                <span>Sembunyikan</span>
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="w-3.5 h-3.5 text-[#10B981]" />
-                                <span>Tampilkan</span>
-                              </>
-                            )}
-                          </button>
+                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditProduct(prod)}
+                              className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-[#ECFDF5] hover:bg-emerald-100 text-[#059669] text-xs font-bold inline-flex items-center gap-1"
+                            >
+                              <span>Edit</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteProduct(prod)}
-                            className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-[#EF4444]"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleProductActive(prod)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold inline-flex items-center gap-1.5"
+                            >
+                              {prod.is_active ? (
+                                <>
+                                  <EyeOff className="w-3.5 h-3.5 text-[#64748B]" />
+                                  <span>Sembunyikan</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="w-3.5 h-3.5 text-[#10B981]" />
+                                  <span>Tampilkan</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(prod)}
+                              className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-[#EF4444]"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               )}
             </div>

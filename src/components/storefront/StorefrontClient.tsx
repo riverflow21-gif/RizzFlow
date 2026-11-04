@@ -1439,7 +1439,7 @@ export default function StorefrontClient({
         </section>
       </main>
 
-      {/* MODAL AMBIL KODE PRE-ORDER 4 ANGKA (KHUSUS PRODUK TIPE LANGGANAN) */}
+     {/* MODAL AMBIL KODE PRE-ORDER 4 ANGKA (KHUSUS PRODUK TIPE LANGGANAN) */}
       <AnimatePresence>
         {subPreorderProduct && (
           <motion.div
@@ -1458,93 +1458,149 @@ export default function StorefrontClient({
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800">
-                  👑 Produk Langganan (Cek Stok Dulu)
+                  👑 Produk Tipe Langganan
                 </span>
                 <button
                   type="button"
                   onClick={closeOverlayCleanly}
                   className="p-1.5 rounded-lg text-[#64748B] hover:bg-slate-100"
                 >
-                  <X className="w-5 h-5"/>
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
               {!createdSubOrder ? (
-                <form
-                  onSubmit={handleCreateSubscriptionPreorder}
-                  className="space-y-4"
-                >
-                  <div>
+                <div className="space-y-4">
+                  {/* Info Produk yang Dipilih */}
+                  <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200">
                     <h3 className="font-extrabold text-base text-[#0F172A]">
                       {subPreorderProduct.title}
                     </h3>
-                    <p className="text-sm font-extrabold text-[#10B981]">
+                    <p className="text-sm font-extrabold text-[#10B981] mt-0.5">
                       Rp{subPreorderProduct.price.toLocaleString('id-ID')}
                     </p>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200 text-xs text-[#64748B] space-y-1.5 leading-relaxed">
-                    <p className="font-bold text-[#0F172A]">
-                      Cara Pembelian Produk Langganan:
-                    </p>
-                    <p>
-                      1. Ambil <strong>Kode Antrian 4 Angka</strong> di bawah ini (Tanpa bayar di awal).
-                    </p>
-                    <p>
-                      2. Admin akan mengecek ketersediaan stok (Maksimal 2 jam). Kamu juga bisa klik tombol WhatsApp/Telegram setelah kode muncul agar direspon lebih cepat.
-                    </p>
-                    <p>
-                      3. Saat stok dikonfirmasi tersedia, kamu akan menerima email dan bisa langsung membayar via QRIS menggunakan kode 4 angka tersebut.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      required
-                      value={subName}
-                      onChange={(e) => setSubName(e.target.value)}
-                      placeholder="Nama Kamu *"
-                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                    />
-                    <input
-                      type="email"
-                      required
-                      value={subEmail}
-                      onChange={(e) => setSubEmail(e.target.value)}
-                      placeholder="Alamat Email Aktif * (Untuk notif stok & akun)"
-                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                    />
-                    <input
-                      type="text"
-                      value={subContact}
-                      onChange={(e) => setSubContact(e.target.value)}
-                      placeholder="Nomor WhatsApp (Opsional)"
-                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                    />
-                  </div>
-
-                  {subModalError && (
-                    <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-[#EF4444]">
-                      {subModalError}
+                  {/* OPSI 1: HUBUNGI ADMIN LANGSUNG VIA WA / TELEGRAM */}
+                  <div className="p-4 rounded-xl bg-[#ECFDF5]/60 border border-emerald-200 space-y-2.5">
+                    <div className="text-xs font-extrabold text-[#059669]">
+                      OPSI 1 — Hubungi Admin Langsung (Respon Lebih Cepat)
                     </div>
-                  )}
+                    <p className="text-[11px] text-[#64748B] leading-relaxed">
+                      Ingin cek stok dan transaksi langsung melalui chat? Klik tombol WhatsApp atau Telegram Admin di bawah ini:
+                    </p>
 
-                  <button
-                    type="submit"
-                    disabled={isCreatingSub}
-                    className="w-full py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2"
+                    <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                      {getDirectWhatsAppUrl(
+                        `Halo Admin RizzFlow, saya ingin membeli produk langganan *${subPreorderProduct.title}* (Rp${subPreorderProduct.price.toLocaleString('id-ID')}). Apakah stoknya tersedia saat ini?`
+                      ) ? (
+                        <a
+                          href={
+                            getDirectWhatsAppUrl(
+                              `Halo Admin RizzFlow, saya ingin membeli produk langganan *${subPreorderProduct.title}* (Rp${subPreorderProduct.price.toLocaleString('id-ID')}). Apakah stoknya tersedia saat ini?`
+                            )!
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          <span>Chat via WhatsApp</span>
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-[#64748B] italic">
+                          (Nomor WA belum diatur di Admin)
+                        </span>
+                      )}
+
+                      {getDirectTelegramUrl() && (
+                        <a
+                          href={getDirectTelegramUrl()!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                        >
+                          <Send className="w-4 h-4" />
+                          <span>Chat via Telegram</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Garis Pemisah Antara Opsi 1 dan Opsi 2 */}
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-slate-200" />
+                    <span className="flex-shrink mx-3 text-[10px] font-extrabold uppercase tracking-wider text-[#64748B]">
+                      ATAU TRANSAKSI DI WEBSITE
+                    </span>
+                    <div className="flex-grow border-t border-slate-200" />
+                  </div>
+
+                  {/* OPSI 2: AMBIL KODE 4 ANGKA & BALASAN VIA EMAIL */}
+                  <form
+                    onSubmit={handleCreateSubscriptionPreorder}
+                    className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 space-y-3"
                   >
-                    {isCreatingSub ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin"/>
-                        <span>Membuat Kode 4 Angka...</span>
-                      </>
-                    ) : (
-                      <span>Ambil Kode Pre-Order (4 Angka) Sekarang</span>
+                    <div>
+                      <div className="text-xs font-extrabold text-[#0F172A]">
+                        OPSI 2 — Ambil Kode 4 Angka (Balasan via Email &amp; Bayar di Web)
+                      </div>
+                      <p className="text-[11px] text-[#64748B] mt-0.5 leading-relaxed">
+                        Dapatkan Kode Antrian 4 Angka tanpa bayar di awal. Admin akan mengirim konfirmasi stok ke emailmu (maks 2 jam) dan kamu bisa lanjut bayar via QRIS di website ini.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <input
+                        type="text"
+                        required
+                        value={subName}
+                        onChange={(e) => setSubName(e.target.value)}
+                        placeholder="Nama Kamu *"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                      <input
+                        type="email"
+                        required
+                        value={subEmail}
+                        onChange={(e) => setSubEmail(e.target.value)}
+                        placeholder="Alamat Email Aktif * (Untuk terima balasan)"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={subContact}
+                        onChange={(e) => setSubContact(e.target.value)}
+                        placeholder="Nomor WhatsApp (Opsional)"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                    </div>
+
+                    {subModalError && (
+                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-[#EF4444]">
+                        {subModalError}
+                      </div>
                     )}
-                  </button>
-                </form>
+
+                    <button
+                      type="submit"
+                      disabled={isCreatingSub}
+                      className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors"
+                    >
+                      {isCreatingSub ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Membuat Kode 4 Angka...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4 text-emerald-400" />
+                          <span>Ambil Kode 4 Angka &amp; Lanjut di Web</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
               ) : (
                 <div className="text-center space-y-4">
                   <div className="p-4 rounded-2xl bg-[#ECFDF5] border-2 border-[#10B981]">
@@ -1559,7 +1615,7 @@ export default function StorefrontClient({
                       onClick={() => copyToClipboard(createdSubOrder.code)}
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs font-bold text-[#059669]"
                     >
-                      <Copy className="w-3.5 h-3.5"/>
+                      <Copy className="w-3.5 h-3.5" />
                       <span>
                         {copiedCode ? 'Kode Disalin!' : 'Salin Kode 4 Angka'}
                       </span>
@@ -1571,31 +1627,94 @@ export default function StorefrontClient({
                       ⚠️ PENTING: Salin atau ingat 4 angka di atas!
                     </p>
                     <p>
-                      Gunakan kode <strong>{createdSubOrder.code}</strong> pada kotak <em>Cek Status Kode 4 Angka</em> di halaman depan untuk melihat konfirmasi stok dan melakukan pembayaran.
+                      Kami akan mengirimkan email ke <strong>{createdSubOrder.customer_email}</strong> begitu stok dikonfirmasi Admin. Kamu juga bisa mengecek status dan membayar QRIS kapan saja di kotak <em>Cek Status Kode 4 Angka</em> di halaman depan.
                     </p>
                   </div>
 
-                  <div className="space-y-2 pt-1">
-                    <p className="text-xs font-bold text-[#64748B]">
-                      Ingin direspon lebih cepat? Hubungi Admin langsung:
+                  <button
+                    type="button"
+                    onClick={closeOverlayCleanly}
+                    className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-[#0F172A]"
+                  >
+                    Tutup &amp; Lihat Status di Halaman Depan
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>{/* MODAL AMBIL KODE PRE-ORDER 4 ANGKA (KHUSUS PRODUK TIPE LANGGANAN) */}
+      <AnimatePresence>
+        {subPreorderProduct && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeOverlayCleanly}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800">
+                  👑 Produk Tipe Langganan
+                </span>
+                <button
+                  type="button"
+                  onClick={closeOverlayCleanly}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {!createdSubOrder ? (
+                <div className="space-y-4">
+                  {/* Info Produk yang Dipilih */}
+                  <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200">
+                    <h3 className="font-extrabold text-base text-[#0F172A]">
+                      {subPreorderProduct.title}
+                    </h3>
+                    <p className="text-sm font-extrabold text-[#10B981] mt-0.5">
+                      Rp{subPreorderProduct.price.toLocaleString('id-ID')}
                     </p>
-                    <div className="flex flex-col sm:flex-row gap-2">
+                  </div>
+
+                  {/* OPSI 1: HUBUNGI ADMIN LANGSUNG VIA WA / TELEGRAM */}
+                  <div className="p-4 rounded-xl bg-[#ECFDF5]/60 border border-emerald-200 space-y-2.5">
+                    <div className="text-xs font-extrabold text-[#059669]">
+                      OPSI 1 — Hubungi Admin Langsung (Respon Lebih Cepat)
+                    </div>
+                    <p className="text-[11px] text-[#64748B] leading-relaxed">
+                      Ingin cek stok dan transaksi langsung melalui chat? Klik tombol WhatsApp atau Telegram Admin di bawah ini:
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row gap-2 pt-1">
                       {getDirectWhatsAppUrl(
-                        `Halo Admin RizzFlow, saya sudah mengambil Kode Antrian *${createdSubOrder.code}* untuk produk *${createdSubOrder.product_title}*. Mohon info ketersediaan stoknya.`
-                      ) && (
+                        `Halo Admin RizzFlow, saya ingin membeli produk langganan *${subPreorderProduct.title}* (Rp${subPreorderProduct.price.toLocaleString('id-ID')}). Apakah stoknya tersedia saat ini?`
+                      ) ? (
                         <a
                           href={
                             getDirectWhatsAppUrl(
-                              `Halo Admin RizzFlow, saya sudah mengambil Kode Antrian *${createdSubOrder.code}* untuk produk *${createdSubOrder.product_title}*. Mohon info ketersediaan stoknya.`
+                              `Halo Admin RizzFlow, saya ingin membeli produk langganan *${subPreorderProduct.title}* (Rp${subPreorderProduct.price.toLocaleString('id-ID')}). Apakah stoknya tersedia saat ini?`
                             )!
                           }
                           target="_blank"
                           rel="noreferrer"
-                          className="flex-1 py-2.5 px-3 rounded-xl bg-[#10B981] text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                         >
-                          <MessageCircle className="w-4 h-4"/>
-                          <span>Chat WhatsApp Admin</span>
+                          <MessageCircle className="w-4 h-4" />
+                          <span>Chat via WhatsApp</span>
                         </a>
+                      ) : (
+                        <span className="text-[11px] text-[#64748B] italic">
+                          (Nomor WA belum diatur di Admin)
+                        </span>
                       )}
 
                       {getDirectTelegramUrl() && (
@@ -1603,13 +1722,117 @@ export default function StorefrontClient({
                           href={getDirectTelegramUrl()!}
                           target="_blank"
                           rel="noreferrer"
-                          className="flex-1 py-2.5 px-3 rounded-xl bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                         >
-                          <Send className="w-4 h-4"/>
-                          <span>Chat Telegram Admin</span>
+                          <Send className="w-4 h-4" />
+                          <span>Chat via Telegram</span>
                         </a>
                       )}
                     </div>
+                  </div>
+
+                  {/* Garis Pemisah Antara Opsi 1 dan Opsi 2 */}
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-slate-200" />
+                    <span className="flex-shrink mx-3 text-[10px] font-extrabold uppercase tracking-wider text-[#64748B]">
+                      ATAU TRANSAKSI DI WEBSITE
+                    </span>
+                    <div className="flex-grow border-t border-slate-200" />
+                  </div>
+
+                  {/* OPSI 2: AMBIL KODE 4 ANGKA & BALASAN VIA EMAIL */}
+                  <form
+                    onSubmit={handleCreateSubscriptionPreorder}
+                    className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 space-y-3"
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold text-[#0F172A]">
+                        OPSI 2 — Ambil Kode 4 Angka (Balasan via Email &amp; Bayar di Web)
+                      </div>
+                      <p className="text-[11px] text-[#64748B] mt-0.5 leading-relaxed">
+                        Dapatkan Kode Antrian 4 Angka tanpa bayar di awal. Admin akan mengirim konfirmasi stok ke emailmu (maks 2 jam) dan kamu bisa lanjut bayar via QRIS di website ini.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <input
+                        type="text"
+                        required
+                        value={subName}
+                        onChange={(e) => setSubName(e.target.value)}
+                        placeholder="Nama Kamu *"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                      <input
+                        type="email"
+                        required
+                        value={subEmail}
+                        onChange={(e) => setSubEmail(e.target.value)}
+                        placeholder="Alamat Email Aktif * (Untuk terima balasan)"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={subContact}
+                        onChange={(e) => setSubContact(e.target.value)}
+                        placeholder="Nomor WhatsApp (Opsional)"
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm"
+                      />
+                    </div>
+
+                    {subModalError && (
+                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-[#EF4444]">
+                        {subModalError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isCreatingSub}
+                      className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors"
+                    >
+                      {isCreatingSub ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Membuat Kode 4 Angka...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4 text-emerald-400" />
+                          <span>Ambil Kode 4 Angka &amp; Lanjut di Web</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="text-center space-y-4">
+                  <div className="p-4 rounded-2xl bg-[#ECFDF5] border-2 border-[#10B981]">
+                    <span className="text-xs font-bold text-[#059669] uppercase">
+                      Kode Pre-Order / Antrian Kamu:
+                    </span>
+                    <div className="text-4xl font-extrabold tracking-widest text-[#0F172A] my-2">
+                      {createdSubOrder.code}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(createdSubOrder.code)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs font-bold text-[#059669]"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>
+                        {copiedCode ? 'Kode Disalin!' : 'Salin Kode 4 Angka'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-900 space-y-1">
+                    <p className="font-extrabold">
+                      ⚠️ PENTING: Salin atau ingat 4 angka di atas!
+                    </p>
+                    <p>
+                      Kami akan mengirimkan email ke <strong>{createdSubOrder.customer_email}</strong> begitu stok dikonfirmasi Admin. Kamu juga bisa mengecek status dan membayar QRIS kapan saja di kotak <em>Cek Status Kode 4 Angka</em> di halaman depan.
+                    </p>
                   </div>
 
                   <button
@@ -1625,7 +1848,6 @@ export default function StorefrontClient({
           </motion.div>
         )}
       </AnimatePresence>
-
       {/* MODAL PENJELASAN DETAIL CARA BELI PRODUK LANGGANAN */}
       <AnimatePresence>
         {showSubGuideModal && (

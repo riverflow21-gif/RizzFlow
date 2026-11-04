@@ -189,13 +189,15 @@ export async function PUT(request: Request) {
       title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
       description: (body.description || '').trim(),
       services: cleanServices,
+      admin_whatsapp: (body.admin_whatsapp || '').trim(),
+      admin_telegram: (body.admin_telegram || '').trim(),
     };
 
     await saveStoredCustomServiceConfig(newConfig);
     return NextResponse.json({
       success: true,
       customServiceConfig: newConfig,
-      message: 'Pengaturan Layanan Kustom berhasil diperbarui!',
+      message: 'Pengaturan Layanan Kustom, Nomor WA & Link Telegram berhasil disimpan!',
     });
   } catch {
     return NextResponse.json(
