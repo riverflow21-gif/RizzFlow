@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   Search,
   ShoppingBag,
@@ -30,6 +31,11 @@ import {
   MessageSquarePlus,
   MailCheck,
   MousePointerClick,
+  Clock,
+  Copy,
+  KeyRound,
+  MessageCircle,
+  Info,
 } from 'lucide-react';
 import {
   supabase,
@@ -37,6 +43,7 @@ import {
   parseProductDeliverables,
   CustomServiceConfig,
   DEFAULT_CUSTOM_SERVICE_CONFIG,
+  SubscriptionOrder,
 } from '@/lib/supabase';
 import { Category, Product, CartItem, StoreSettings } from '@/types';
 
@@ -47,30 +54,30 @@ interface StorefrontClientProps {
 }
 
 const CART_STORAGE_KEY = 'rizzflow_cart_v1';
-const PRODUCTS_PER_SLIDE = 6; // Maksimal 6 produk per halaman/slide
-const VISIBLE_CATEGORY_LIMIT = 5; // Batas kategori sebelum dilipat ke tombol "Lainnya..."
+const PRODUCTS_PER_SLIDE = 6;
+const VISIBLE_CATEGORY_LIMIT = 5;
 
 const OLD_DEFAULT_DESC =
   'Temukan template Excel, PPT, dan aset desain siap pakai untuk mempercepat produktivitasmu.';
 const NEW_GENERAL_DESC =
-  'Solusi Produk Digital Instan, Praktis, dan Berkualitas. Dapatkan berbagai koleksi e-book, dokumen, template, hingga layanan pembuatan kustom sesuai kebutuhanmu.';
+  'Solusi Produk Digital Instan, Akun Premium Bergaransi, dan Layanan Pembuatan Kustom Sesuai Kebutuhanmu.';
 
 const FAQ_ITEMS = [
   {
-    q: 'Bagaimana cara menerima file produk setelah saya membayar QRIS?',
-    a: 'Begitu kamu selesai membayar kode QRIS, sistem otomatis RizzFlow langsung mendeteksi pembayaranmu dalam hitungan detik dan mengirimkan link unduhan produk ke alamat email yang kamu isi saat Checkout.',
+    q: 'Bagaimana cara kerja pembelian Produk Tipe Langganan (Netflix, CapCut Pro, dll.)?',
+    a: 'Untuk produk bertanda "Langganan", kamu tidak perlu membayar di awal! Cukup klik produknya, ambil Kode Antrian 4 Angka (gratis), atau hubungi Admin via WhatsApp/Telegram. Begitu Admin mengonfirmasi stok tersedia (maksimal 2 jam), kamu akan menerima email dan bisa langsung membayar via QRIS menggunakan Kode 4 Angka tersebut.',
   },
   {
-    q: 'Apakah saya harus daftar akun atau login terlebih dahulu?',
-    a: 'Tidak perlu! Kamu bisa langsung belanja tanpa buat akun (Guest Checkout). Cukup pilih produk, masukkan email aktifmu, dan bayar via QRIS.',
+    q: 'Bagaimana cara menerima file untuk Produk Instan (E-Book, Template Excel, PPT)?',
+    a: 'Untuk produk bertanda "Instan", kamu bisa langsung checkout dan bayar via QRIS. Detik itu juga setelah pembayaran terdeteksi lunas, link unduhan otomatis dikirim ke kotak masuk emailmu.',
   },
   {
-    q: 'Bagaimana cara klaim garansi jika file belum masuk ke email?',
-    a: 'Setiap pembelian bergaransi 100%! Cukup isi Canvas Klaim Garansi di samping/bawah ini dengan mencantumkan email atau nomor invoice-mu. Notifikasi akan langsung berbunyi di perangkat Admin kami.',
+    q: 'Bagaimana jika email produk belum masuk ke kotak masuk utama?',
+    a: 'Periksa tab Promosi/Spam di Gmail kamu, atau gunakan kolom "Cek Kode Antrian 4 Angka" (untuk produk langganan) maupun "Canvas Klaim Garansi" di bagian bawah website ini.',
   },
   {
-    q: 'Bagaimana cara memesan Layanan Kustom (Pembuatan Web / Template Excel / Lainnya)?',
-    a: 'Klik tombol "Pesan Layanan Kustom" di atas atau langsung pilih tab "Jasa Kustom" pada Canvas Pesan di bawah, lalu tuliskan kebutuhanmu. Admin kami akan segera menghubungi kamu.',
+    q: 'Bagaimana cara memesan Layanan Kustom (Pembuatan Web / Template Excel)?',
+    a: 'Klik tombol "Pesan Layanan Kustom" di bawah katalog, lalu tuliskan detail kebutuhanmu pada Canvas Pesan. Admin kami akan segera menghubungi kamu.',
   },
 ];
 
@@ -80,10 +87,11 @@ export default function StorefrontClient({
   settings: initialSettings,
 }: StorefrontClientProps) {
   const router = useRouter();
-  const canvasFormRef = useRef<HTMLDivElement | null>(null);
-  const catalogTopRef = useRef<HTMLDivElement | null>(null);
+  const canvasFormRef = useRef(null as HTMLDivElement | null);
+  const catalogTopRef = useRef(null as HTMLDivElement | null);
+  const subCheckRef = useRef(null as HTMLDivElement | null);
 
-  // State data produk, kategori, pengaturan, & layanan kustom
+  // State data utama
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
@@ -91,41 +99,69 @@ export default function StorefrontClient({
     DEFAULT_CUSTOM_SERVICE_CONFIG
   );
 
-  // State pencarian, kategori, lipatan kategori, & nomor slide produk
+  // State filter katalog, pencarian, kategori, & slide
+  const [catalogTypeFilter, setCatalogTypeFilter] = useState(
+    'ALL' as 'ALL' | 'INSTAN' | 'LANGGANAN'
+  );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('ALL');
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [currentSlide, setCurrentSlide] = useState<number>(1);
 
   // State detail produk, keranjang, dan FAQ
-  const [activeProduct, setActiveProduct] = useState<Product | null>(null);
+  const [activeProduct, setActiveProduct] = useState(null as Product | null);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [addedProductId, setAddedProductId] = useState<string | null>(null);
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [addedProductId, setAddedProductId] = useState(null as string | null);
+  const [openFaqIndex, setOpenFaqIndex] = useState(0 as number | null);
+
+  // State khusus produk langganan (Pre-Order Kode 4 Angka & Cek Status)
+  const [subPreorderProduct, setSubPreorderProduct] = useState(
+    null as Product | null
+  );
+  const [subName, setSubName] = useState<string>('');
+  const [subEmail, setSubEmail] = useState<string>('');
+  const [subContact, setSubContact] = useState<string>('');
+  const [isCreatingSub, setIsCreatingSub] = useState<boolean>(false);
+  const [subModalError, setSubModalError] = useState(null as string | null);
+  const [createdSubOrder, setCreatedSubOrder] = useState(
+    null as SubscriptionOrder | null
+  );
+  const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [showSubGuideModal, setShowSubGuideModal] = useState<boolean>(false);
+
+  // State kolom pengecekan kode 4 angka
+  const [checkCodeInput, setCheckCodeInput] = useState<string>('');
+  const [checkedSubOrder, setCheckedSubOrder] = useState(
+    null as SubscriptionOrder | null
+  );
+  const [isCheckingCode, setIsCheckingCode] = useState<boolean>(false);
+  const [checkCodeError, setCheckCodeError] = useState(null as string | null);
+  const [isSubSimMode, setIsSubSimMode] = useState<boolean>(false);
+  const [isProcessingSubPayment, setIsProcessingSubPayment] =
+    useState<boolean>(false);
 
   // State Canvas Formulir Klaim Garansi & Pesan Layanan Khusus
-  const [msgType, setMsgType] = useState<
-    'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN'
-  >('KLAIM_GARANSI');
+  const [msgType, setMsgType] = useState(
+    'KLAIM_GARANSI' as 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN'
+  );
   const [senderName, setSenderName] = useState<string>('');
   const [senderEmail, setSenderEmail] = useState<string>('');
   const [senderContact, setSenderContact] = useState<string>('');
   const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [messageText, setMessageText] = useState<string>('');
   const [isSendingMsg, setIsSendingMsg] = useState<boolean>(false);
-  const [msgFeedback, setMsgFeedback] = useState<{
-    type: 'success' | 'error';
-    text: string;
-  } | null>(null);
+  const [msgFeedback, setMsgFeedback] = useState(
+    null as { type: 'success' | 'error'; text: string } | null
+  );
 
   const bannerDescription =
-    !settings.banner_description || settings.banner_description === OLD_DEFAULT_DESC
+    !settings.banner_description ||
+    settings.banner_description === OLD_DEFAULT_DESC
       ? NEW_GENERAL_DESC
       : settings.banner_description;
 
-  // Segarkan data katalog & layanan kustom setiap kali halaman dibuka
   useEffect(() => {
     const refreshStorefrontData = async () => {
       const [prodRes, catRes, setRes] = await Promise.all([
@@ -134,7 +170,10 @@ export default function StorefrontClient({
           .select('*, categories(*)')
           .eq('is_active', true)
           .order('created_at', { ascending: false }),
-        supabase.from('categories').select('*').order('name', { ascending: true }),
+        supabase
+          .from('categories')
+          .select('*')
+          .order('name', { ascending: true }),
         supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
       ]);
 
@@ -153,20 +192,20 @@ export default function StorefrontClient({
           }
         }
       } catch {
-        // Gunakan default jika gagal memuat
+        // Gunakan konfigurasi default
       }
     };
 
     refreshStorefrontData();
   }, []);
 
-  // Reset slide kembali ke halaman 1 setiap kali kata kunci pencarian atau kategori berubah
   useEffect(() => {
     setCurrentSlide(1);
-  }, [searchQuery, selectedCategoryId]);
+  }, [searchQuery, selectedCategoryId, catalogTypeFilter]);
 
-  // Penanganan Tombol Back Bawaan HP & Kunci Scroll Layar Belakang
-  const isAnyOverlayOpen = Boolean(activeProduct || isCartOpen);
+  const isAnyOverlayOpen = Boolean(
+    activeProduct || isCartOpen || subPreorderProduct || showSubGuideModal
+  );
 
   useEffect(() => {
     if (isAnyOverlayOpen) {
@@ -187,32 +226,34 @@ export default function StorefrontClient({
     const handleHardwareBackButton = () => {
       setActiveProduct(null);
       setIsCartOpen(false);
+      setSubPreorderProduct(null);
+      setShowSubGuideModal(false);
     };
 
     window.addEventListener('popstate', handleHardwareBackButton);
-    return () => window.removeEventListener('popstate', handleHardwareBackButton);
+    return () =>
+      window.removeEventListener('popstate', handleHardwareBackButton);
   }, []);
 
   const closeOverlayCleanly = () => {
     setActiveProduct(null);
     setIsCartOpen(false);
+    setSubPreorderProduct(null);
+    setShowSubGuideModal(false);
     if (window.history.state?.rizzflowOverlay) {
       window.history.back();
     }
   };
 
-  // Muat isi keranjang dari localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(CART_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as CartItem[];
-        if (Array.isArray(parsed)) {
-          setCart(parsed);
-        }
+        if (Array.isArray(parsed)) setCart(parsed);
       }
     } catch (e) {
-      console.error('Gagal memuat keranjang dari localStorage:', e);
+      console.error('Gagal memuat keranjang:', e);
     }
   }, []);
 
@@ -221,11 +262,21 @@ export default function StorefrontClient({
     try {
       localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(newCart));
     } catch (e) {
-      console.error('Gagal menyimpan keranjang ke localStorage:', e);
+      console.error('Gagal menyimpan keranjang:', e);
     }
   };
 
   const handleAddToCart = (product: Product) => {
+    const deliverables = parseProductDeliverables(product.file_path);
+
+    if (deliverables.product_type === 'LANGGANAN') {
+      setActiveProduct(null);
+      setCreatedSubOrder(null);
+      setSubModalError(null);
+      setSubPreorderProduct(product);
+      return;
+    }
+
     const primaryThumb =
       parseThumbnails(product.thumbnail_url)[0] || product.thumbnail_url;
     const normalizedProduct: Product = {
@@ -233,7 +284,9 @@ export default function StorefrontClient({
       thumbnail_url: primaryThumb,
     };
 
-    const existingIndex = cart.findIndex((item) => item.product.id === product.id);
+    const existingIndex = cart.findIndex(
+      (item) => item.product.id === product.id
+    );
     let updated: CartItem[];
 
     if (existingIndex > -1) {
@@ -265,6 +318,170 @@ export default function StorefrontClient({
     updateCartStorage(updated);
   };
 
+  const handleCreateSubscriptionPreorder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subPreorderProduct) return;
+
+    setIsCreatingSub(true);
+    setSubModalError(null);
+    try {
+      const res = await fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CREATE_PREORDER',
+          product_id: subPreorderProduct.id,
+          customer_name: subName,
+          customer_email: subEmail,
+          customer_contact: subContact,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        subscription?: SubscriptionOrder;
+        error?: string;
+      };
+
+      if (!res.ok || !data.subscription) {
+        throw new Error(data.error || 'Gagal membuat kode antrian.');
+      }
+
+      setCreatedSubOrder(data.subscription);
+      setCheckCodeInput(data.subscription.code);
+      setCheckedSubOrder(data.subscription);
+    } catch (err) {
+      setSubModalError(
+        err instanceof Error ? err.message : 'Gagal membuat kode antrian.'
+      );
+    } finally {
+      setIsCreatingSub(false);
+    }
+  };
+
+  const handleCheckSubscriptionCode = async (
+    e?: React.FormEvent,
+    codeOverride?: string
+  ) => {
+    if (e) e.preventDefault();
+    const targetCode = (codeOverride ?? checkCodeInput).trim();
+    if (!targetCode) return;
+
+    setIsCheckingCode(true);
+    setCheckCodeError(null);
+    try {
+      const res = await fetch(
+        `/api/subscriptions?code=${encodeURIComponent(targetCode)}`
+      );
+      const data = (await res.json()) as {
+        subscription?: SubscriptionOrder;
+        simulation_mode?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok || !data.subscription) {
+        setCheckedSubOrder(null);
+        throw new Error(data.error || 'Kode 4 angka tidak ditemukan.');
+      }
+
+      setCheckedSubOrder(data.subscription);
+      setIsSubSimMode(Boolean(data.simulation_mode));
+    } catch (err) {
+      setCheckCodeError(
+        err instanceof Error ? err.message : 'Gagal mengecek kode antrian.'
+      );
+    } finally {
+      setIsCheckingCode(false);
+    }
+  };
+
+  const handleGenerateSubscriptionQris = async (code: string) => {
+    setIsProcessingSubPayment(true);
+    setCheckCodeError(null);
+    try {
+      const res = await fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'GENERATE_QRIS',
+          code,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        subscription?: SubscriptionOrder;
+        simulation_mode?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok || !data.subscription) {
+        throw new Error(data.error || 'Gagal menyiapkan QRIS.');
+      }
+
+      setCheckedSubOrder(data.subscription);
+      setIsSubSimMode(Boolean(data.simulation_mode));
+    } catch (err) {
+      setCheckCodeError(
+        err instanceof Error ? err.message : 'Gagal membuat QRIS.'
+      );
+    } finally {
+      setIsProcessingSubPayment(false);
+    }
+  };
+
+  const handleConfirmSubscriptionPayment = async (code: string) => {
+    setIsProcessingSubPayment(true);
+    setCheckCodeError(null);
+    try {
+      const res = await fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CONFIRM_PAYMENT',
+          code,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        subscription?: SubscriptionOrder;
+        error?: string;
+      };
+
+      if (!res.ok || !data.subscription) {
+        throw new Error(data.error || 'Gagal mengonfirmasi pembayaran.');
+      }
+
+      setCheckedSubOrder(data.subscription);
+    } catch (err) {
+      setCheckCodeError(
+        err instanceof Error ? err.message : 'Gagal memproses pembayaran.'
+      );
+    } finally {
+      setIsProcessingSubPayment(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  };
+
+  const getDirectWhatsAppUrl = (customText: string) => {
+    const rawWa = customService.admin_whatsapp || settings.support_contact || '';
+    const digits = rawWa.replace(/[^0-9]/g, '');
+    if (!digits) return null;
+    const formatted = digits.startsWith('0') ? '62' + digits.slice(1) : digits;
+    return `[https://wa.me/$](https://wa.me/$){formatted}?text=${encodeURIComponent(customText)}`;
+  };
+
+  const getDirectTelegramUrl = () => {
+    const rawTg = (customService.admin_telegram || '').trim().replace(/^@/, '');
+    if (!rawTg) return null;
+    return rawTg.startsWith('http') ? rawTg : `[https://t.me/$](https://t.me/$){rawTg}`;
+  };
+
   const handleJumpToCustomServiceCanvas = () => {
     setMsgType('LAYANAN_KHUSUS');
     if (!messageText.trim()) {
@@ -272,7 +489,10 @@ export default function StorefrontClient({
         'Halo Admin RizzFlow, saya ingin memesan Layanan Kustom. Berikut detail kebutuhan saya: '
       );
     }
-    canvasFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    canvasFormRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
   };
 
   const handleSendCanvasMessage = async (e: React.FormEvent) => {
@@ -318,22 +538,26 @@ export default function StorefrontClient({
     }
   };
 
-  // Filter produk berdasarkan pencarian & kategori
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
+      const deliverables = parseProductDeliverables(product.file_path);
+      const pType = deliverables.product_type || 'INSTAN';
+
+      const matchesType =
+        catalogTypeFilter === 'ALL' || pType === catalogTypeFilter;
       const matchesCategory =
-        selectedCategoryId === 'ALL' || product.category_id === selectedCategoryId;
+        selectedCategoryId === 'ALL' ||
+        product.category_id === selectedCategoryId;
       const query = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !query ||
         product.title.toLowerCase().includes(query) ||
         product.description.toLowerCase().includes(query);
 
-      return matchesCategory && matchesSearch;
+      return matchesType && matchesCategory && matchesSearch;
     });
-  }, [products, selectedCategoryId, searchQuery]);
+  }, [products, catalogTypeFilter, selectedCategoryId, searchQuery]);
 
-  // Logika Slide Produk (Maksimal 6 Produk per Slide)
   const totalSlides = Math.max(
     1,
     Math.ceil(filteredProducts.length / PRODUCTS_PER_SLIDE)
@@ -343,7 +567,6 @@ export default function StorefrontClient({
     return filteredProducts.slice(startIdx, startIdx + PRODUCTS_PER_SLIDE);
   }, [filteredProducts, currentSlide]);
 
-  // Logika Lipatan Kategori ("Lainnya...")
   const displayedCategories = showAllCategories
     ? categories
     : categories.slice(0, VISIBLE_CATEGORY_LIMIT);
@@ -363,21 +586,21 @@ export default function StorefrontClient({
     [activeProduct]
   );
 
-  const activeProductOriginalPrice = useMemo(() => {
+  const activeProductDeliverables = useMemo(() => {
     if (!activeProduct) return null;
-    return parseProductDeliverables(activeProduct.file_path).original_price || null;
+    return parseProductDeliverables(activeProduct.file_path);
   }, [activeProduct]);
 
   return (
     <div className="min-h-screen bg-[#FFFFFF] text-[#0F172A] flex flex-col overflow-x-hidden">
       {/* Bilah Navigasi Atas */}
       <header className="sticky top-0 z-30 backdrop-blur-md bg-white/85 border-b border-slate-100">
-        <div className="max-w-6xl mx-auto px-4 h-15 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
             <img
               src="/logo.jpg"
               alt={settings.store_name}
-              className="h-9 w-auto rounded-lg object-contain shadow-xs shrink-0"
+              className="h-9 w-auto rounded-lg object-contain shadow-sm shrink-0"
             />
             <span className="font-bold text-base sm:text-lg tracking-tight text-[#0F172A] truncate">
               {settings.store_name}
@@ -388,12 +611,12 @@ export default function StorefrontClient({
             <button
               type="button"
               onClick={() =>
-                canvasFormRef.current?.scrollIntoView({ behavior: 'smooth' })
+                subCheckRef.current?.scrollIntoView({ behavior: 'smooth' })
               }
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-[#059669] bg-[#ECFDF5] hover:bg-emerald-100 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-[#059669] bg-[#ECFDF5] hover:bg-emerald-100 border border-emerald-200 transition-colors"
             >
-              <MessageSquarePlus className="w-3.5 h-3.5" />
-              <span>Bantuan & Jasa Kustom</span>
+              <KeyRound className="w-3.5 h-3.5"/>
+              <span>Cek Kode 4 Angka</span>
             </button>
 
             <button
@@ -402,7 +625,7 @@ export default function StorefrontClient({
               className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F8FAFC] hover:bg-[#ECFDF5] text-[#0F172A] border border-slate-200/80 transition-colors"
               aria-label="Buka Keranjang Belanja"
             >
-              <ShoppingBag className="w-4 h-4 text-[#10B981]" />
+              <ShoppingBag className="w-4 h-4 text-[#10B981]"/>
               <span className="text-xs sm:text-sm font-semibold hidden sm:inline">
                 Keranjang
               </span>
@@ -416,9 +639,9 @@ export default function StorefrontClient({
         </div>
       </header>
 
-      {/* Konten Utama Katalog Toko (Lebih Padat & Ringkas) */}
+      {/* Konten Utama Katalog Toko */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-5 sm:py-8 space-y-6">
-        {/* Banner Sambutan + 4 Keunggulan Ringkas (Tanpa Sub-Teks) */}
+        {/* Banner Sambutan + 4 Keunggulan Ringkas */}
         <section className="space-y-3">
           <div className="bg-gradient-to-br from-[#ECFDF5] via-[#F8FAFC] to-white border border-emerald-100 rounded-2xl p-5 sm:p-6">
             <h1 className="text-xl sm:text-2xl font-extrabold text-[#0F172A] tracking-tight mb-1.5">
@@ -429,37 +652,251 @@ export default function StorefrontClient({
             </p>
           </div>
 
-          {/* 4 Keunggulan Web Pendek & Ringkas */}
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
-              <Zap className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
-              <span>Pengiriman Instan</span>
+              <Zap className="w-3.5 h-3.5 text-[#10B981] shrink-0"/>
+              <span>File Instan &amp; Akun Premium</span>
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
-              <QrCode className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <QrCode className="w-3.5 h-3.5 text-[#10B981] shrink-0"/>
               <span>QRIS Resmi</span>
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
-              <UserCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <UserCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0"/>
               <span>Tanpa Daftar Akun</span>
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <ShieldCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0"/>
               <span>Bergaransi 100%</span>
             </div>
           </div>
         </section>
 
-        {/* Pencarian, Kategori Berurut ke Bawah ("Lainnya..."), & Slide Produk (Maks 6) */}
+        {/* WIDGET CEK KODE ANTRIAN / PRE-ORDER LANGGANAN (4 ANGKA) */}
+        <section
+          ref={subCheckRef}
+          className="bg-white border-2 border-emerald-200 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#059669]">
+                <KeyRound className="w-4 h-4"/>
+                <span>Lacak Pesanan Akun Premium / Langganan</span>
+              </div>
+              <h2 className="text-sm sm:text-base font-extrabold text-[#0F172A] mt-0.5">
+                Cek Status Kode Pre-Order / Antrian (4 Angka)
+              </h2>
+              <p className="text-xs text-[#64748B]">
+                Masukkan 4 angka kode antrianmu untuk melihat konfirmasi stok Admin, membayar QRIS, atau mengambil akunmu.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSubGuideModal(true)}
+              className="self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] hover:bg-[#ECFDF5] text-[#059669] border border-emerald-200 text-xs font-bold shrink-0"
+            >
+              <Info className="w-3.5 h-3.5"/>
+              <span>Cara Beli Produk Langganan</span>
+            </button>
+          </div>
+
+          <form
+            onSubmit={(e) => handleCheckSubscriptionCode(e)}
+            className="flex gap-2"
+          >
+            <input
+              type="text"
+              maxLength={4}
+              value={checkCodeInput}
+              onChange={(e) =>
+                setCheckCodeInput(e.target.value.replace(/[^0-9]/g, ''))
+              }
+              placeholder="Ketik 4 angka kode antrian (Contoh: 4829)"
+              className="flex-1 px-4 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-sm font-extrabold tracking-widest text-[#0F172A] placeholder:font-normal placeholder:tracking-normal focus:outline-none focus:border-[#10B981]"
+            />
+            <button
+              type="submit"
+              disabled={isCheckingCode || checkCodeInput.length < 4}
+              className="px-5 py-2.5 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-slate-300 text-white font-bold text-xs sm:text-sm transition-colors shrink-0"
+            >
+              {isCheckingCode ? 'Mengecek...' : 'Cek Status'}
+            </button>
+          </form>
+
+          {checkCodeError && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-[#EF4444] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0"/>
+              <span>{checkCodeError}</span>
+            </div>
+          )}
+
+          {checkedSubOrder && (
+            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <span className="text-xs font-bold text-[#64748B]">
+                    Kode Antrian:{' '}
+                    <strong className="text-[#0F172A] text-sm">
+                      #{checkedSubOrder.code}
+                    </strong>
+                  </span>
+                  <h3 className="font-extrabold text-base text-[#0F172A]">
+                    {checkedSubOrder.product_title} — Rp
+                    {checkedSubOrder.product_price.toLocaleString('id-ID')}
+                  </h3>
+                </div>
+
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-extrabold self-start sm:self-center ${
+                    checkedSubOrder.status === 'MENUNGGU_ADMIN'
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : checkedSubOrder.status === 'STOK_TERSEDIA'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                      : checkedSubOrder.status === 'DIPROSES'
+                      ? 'bg-[#ECFDF5] text-[#059669] border border-emerald-300'
+                      : 'bg-red-100 text-[#EF4444] border border-red-300'
+                  }`}
+                >
+                  {checkedSubOrder.status === 'MENUNGGU_ADMIN'
+                    ? '1. Menunggu Jawaban Admin (Maks 2 Jam)'
+                    : checkedSubOrder.status === 'STOK_TERSEDIA'
+                    ? 'Stok Tersedia — Silakan Bayar QRIS'
+                    : checkedSubOrder.status === 'DIPROSES'
+                    ? '2. Pesanan Diproses (Tidak Bisa Dibatalkan)'
+                    : '3. Pesanan Dibatalkan'}
+                </span>
+              </div>
+
+              <div className="text-xs text-[#0F172A] space-y-1">
+                <p>
+                  <strong>Keterangan:</strong> {checkedSubOrder.admin_note}
+                </p>
+                {checkedSubOrder.status === 'MENUNGGU_ADMIN' && (
+                  <p className="text-amber-700 font-semibold">
+                    Batas waktu respon Admin sampai:{' '}
+                    {new Date(checkedSubOrder.expires_wait_at).toLocaleTimeString(
+                      'id-ID',
+                      { hour: '2-digit', minute: '2-digit' }
+                    )}{' '}
+                    WIB (Jika lewat 2 jam belum dijawab, pesanan otomatis dibatalkan).
+                  </p>
+                )}
+              </div>
+
+              {checkedSubOrder.status === 'STOK_TERSEDIA' && (
+                <div className="pt-2 space-y-3">
+                  {!checkedSubOrder.qris_string ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleGenerateSubscriptionQris(checkedSubOrder.code)
+                      }
+                      disabled={isProcessingSubPayment}
+                      className="w-full py-3 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <QrCode className="w-4 h-4"/>
+                      <span>
+                        {isProcessingSubPayment
+                          ? 'Menyiapkan Kode QRIS...'
+                          : 'Stok Tersedia! Klik untuk Bayar Sekarang via QRIS'}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="bg-white p-4 rounded-xl border border-emerald-200 text-center space-y-3">
+                      <p className="text-xs font-bold text-[#0F172A]">
+                        Pindai QRIS di bawah ini untuk menyelesaikan pembayaran:
+                      </p>
+                      <div className="bg-[#F8FAFC] p-3 rounded-xl inline-block border border-slate-200">
+                        {React.createElement(QRCodeSVG, {
+                          value: checkedSubOrder.qris_string,
+                          size: 180,
+                        })}
+                      </div>
+                      {isSubSimMode && (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleConfirmSubscriptionPayment(
+                                checkedSubOrder.code
+                              )
+                            }
+                            disabled={isProcessingSubPayment}
+                            className="w-full py-2.5 px-4 rounded-xl bg-[#059669] hover:bg-[#047857] text-white font-bold text-xs"
+                          >
+                            {isProcessingSubPayment
+                              ? 'Memproses...'
+                              : '✨ Simulasikan Pembayaran QRIS Lunas'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {checkedSubOrder.status === 'DIPROSES' &&
+                checkedSubOrder.delivered_account && (
+                  <div className="p-3.5 rounded-xl bg-[#ECFDF5] border border-emerald-300 space-y-1.5">
+                    <div className="text-xs font-extrabold text-[#059669]">
+                      🎉 Detail Akun / Produk Langganan Kamu:
+                    </div>
+                    <pre className="text-xs font-mono text-[#0F172A] whitespace-pre-wrap break-all bg-white p-3 rounded-lg border border-emerald-200">
+                      {checkedSubOrder.delivered_account}
+                    </pre>
+                  </div>
+                )}
+            </div>
+          )}
+        </section>
+
+        {/* Pencarian, Filter Tipe Produk, & Katalog */}
         <section ref={catalogTopRef} className="space-y-4">
           <div className="space-y-2.5">
+            <div className="grid grid-cols-3 gap-2 bg-[#F8FAFC] p-1.5 rounded-xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setCatalogTypeFilter('ALL')}
+                className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all ${
+                  catalogTypeFilter === 'ALL'
+                    ? 'bg-white text-[#0F172A] shadow-sm border border-slate-200/60'
+                    : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                Semua Katalog
+              </button>
+              <button
+                type="button"
+                onClick={() => setCatalogTypeFilter('INSTAN')}
+                className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all ${
+                  catalogTypeFilter === 'INSTAN'
+                    ? 'bg-[#10B981] text-white shadow-sm'
+                    : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                ⚡ Produk File Instan
+              </button>
+              <button
+                type="button"
+                onClick={() => setCatalogTypeFilter('LANGGANAN')}
+                className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all ${
+                  catalogTypeFilter === 'LANGGANAN'
+                    ? 'bg-[#10B981] text-white shadow-sm'
+                    : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                👑 Katalog Langganan
+              </button>
+            </div>
+
             <div className="relative">
-              <Search className="w-4 h-4 text-[#64748B] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="w-4 h-4 text-[#64748B] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"/>
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari e-book, template, atau produk digital..."
+                placeholder="Cari e-book, template, CapCut Pro, Netflix..."
                 className="w-full pl-10 pr-9 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm text-[#0F172A] placeholder:text-[#64748B] focus:outline-none focus:border-[#10B981] focus:bg-white transition-all"
               />
               {searchQuery && (
@@ -468,23 +905,22 @@ export default function StorefrontClient({
                   onClick={() => setSearchQuery('')}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4"/>
                 </button>
               )}
             </div>
 
-            {/* Daftar Kategori Kecil Berurut ke Bawah + Tombol "Lainnya..." */}
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setSelectedCategoryId('ALL')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   selectedCategoryId === 'ALL'
-                    ? 'bg-[#10B981] text-white shadow-xs'
+                    ? 'bg-[#10B981] text-white shadow-sm'
                     : 'bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] border border-slate-200/80'
                 }`}
               >
-                Semua ({products.length})
+                Semua Kategori
               </button>
 
               {displayedCategories.map((cat) => (
@@ -494,7 +930,7 @@ export default function StorefrontClient({
                   onClick={() => setSelectedCategoryId(cat.id)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                     selectedCategoryId === cat.id
-                      ? 'bg-[#10B981] text-white shadow-xs'
+                      ? 'bg-[#10B981] text-white shadow-sm'
                       : 'bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] border border-slate-200/80'
                   }`}
                 >
@@ -516,22 +952,21 @@ export default function StorefrontClient({
             </div>
           </div>
 
-          {/* Grid Katalog Produk (Maksimal 6 Produk per Slide) */}
           {filteredProducts.length === 0 ? (
             <div className="text-center py-12 bg-[#F8FAFC] rounded-2xl border border-dashed border-slate-200 px-4">
-              <FileText className="w-9 h-9 text-[#64748B] mx-auto mb-2 stroke-[1.5]" />
+              <FileText className="w-9 h-9 text-[#64748B] mx-auto mb-2 stroke-[1.5]"/>
               <p className="font-semibold text-sm text-[#0F172A] mb-0.5">
                 Produk tidak ditemukan
               </p>
               <p className="text-xs text-[#64748B]">
-                Coba kata kunci lain atau pilih kategori Semua.
+                Coba pilih tab Semua Katalog atau gunakan kata kunci lain.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={`slide-${currentSlide}-${selectedCategoryId}-${searchQuery}`}
+                  key={`slide-${currentSlide}-${selectedCategoryId}-${catalogTypeFilter}-${searchQuery}`}
                   initial={{ opacity: 0, x: 16 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -16 }}
@@ -542,18 +977,25 @@ export default function StorefrontClient({
                     const isAdded = addedProductId === product.id;
                     const thumbList = parseThumbnails(product.thumbnail_url);
                     const coverThumb = thumbList[0] || '';
-                    const deliverables = parseProductDeliverables(product.file_path);
+                    const deliverables = parseProductDeliverables(
+                      product.file_path
+                    );
+                    const isSubscription =
+                      deliverables.product_type === 'LANGGANAN';
                     const origPrice = deliverables.original_price;
                     const hasDiscount =
-                      typeof origPrice === 'number' && origPrice > product.price;
+                      typeof origPrice === 'number' &&
+                      origPrice > product.price;
                     const savePercent = hasDiscount
-                      ? Math.round(((origPrice - product.price) / origPrice) * 100)
+                      ? Math.round(
+                          ((origPrice - product.price) / origPrice) * 100
+                        )
                       : 0;
 
                     return (
                       <div
                         key={product.id}
-                        className="group bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-xs hover:shadow-md hover:border-emerald-200 transition-all flex flex-col min-w-0"
+                        className="group bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-emerald-200 transition-all flex flex-col min-w-0"
                       >
                         <div
                           onClick={() => {
@@ -568,11 +1010,18 @@ export default function StorefrontClient({
                               alt={product.title}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             />
-                            {product.badge && (
-                              <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 shadow-xs">
-                                {product.badge}
-                              </span>
-                            )}
+                            <span
+                              className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm ${
+                                isSubscription
+                                  ? 'bg-amber-500 text-white'
+                                  : 'bg-[#ECFDF5] text-[#059669] border border-emerald-200'
+                              }`}
+                            >
+                              {isSubscription
+                                ? '👑 Langganan'
+                                : product.badge || '⚡ Instan'}
+                            </span>
+
                             {hasDiscount && savePercent > 0 && (
                               <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-500 text-white">
                                 -{savePercent}%
@@ -580,7 +1029,7 @@ export default function StorefrontClient({
                             )}
                             {thumbList.length > 1 && (
                               <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-900/70 text-white inline-flex items-center gap-1">
-                                <Images className="w-3 h-3" />
+                                <Images className="w-3 h-3"/>
                                 <span>{thumbList.length}</span>
                               </span>
                             )}
@@ -612,19 +1061,26 @@ export default function StorefrontClient({
                             type="button"
                             onClick={() => handleAddToCart(product)}
                             className={`w-full py-2 px-2.5 rounded-lg font-semibold text-xs flex items-center justify-center gap-1 transition-all ${
-                              isAdded
+                              isSubscription
+                                ? 'bg-slate-900 hover:bg-slate-800 text-white'
+                                : isAdded
                                 ? 'bg-[#059669] text-white'
                                 : 'bg-[#10B981] hover:bg-[#059669] text-white'
                             }`}
                           >
-                            {isAdded ? (
+                            {isSubscription ? (
                               <>
-                                <Check className="w-3.5 h-3.5" />
+                                <Clock className="w-3.5 h-3.5 text-emerald-400"/>
+                                <span>Cek Stok &amp; Ambil Kode</span>
+                              </>
+                            ) : isAdded ? (
+                              <>
+                                <Check className="w-3.5 h-3.5"/>
                                 <span>Ditambahkan</span>
                               </>
                             ) : (
                               <>
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-3.5 h-3.5"/>
                                 <span>Keranjang</span>
                               </>
                             )}
@@ -636,7 +1092,6 @@ export default function StorefrontClient({
                 </motion.div>
               </AnimatePresence>
 
-              {/* Navigasi Slide Halaman Produk (Muncul Jika Produk Lebih dari 6) */}
               {totalSlides > 1 && (
                 <div className="flex items-center justify-between gap-2 pt-1 bg-[#F8FAFC] px-3.5 py-2.5 rounded-xl border border-slate-200/80">
                   <button
@@ -644,31 +1099,33 @@ export default function StorefrontClient({
                     disabled={currentSlide === 1}
                     onClick={() => {
                       setCurrentSlide((p) => Math.max(1, p - 1));
-                      catalogTopRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      catalogTopRef.current?.scrollIntoView({
+                        behavior: 'smooth',
+                      });
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40 hover:border-[#10B981] transition-colors"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-4 h-4"/>
                     <span>Sebelumnya</span>
                   </button>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-extrabold text-[#0F172A]">
-                      Slide {currentSlide} / {totalSlides}
-                    </span>
-                  </div>
+                  <span className="text-xs font-extrabold text-[#0F172A]">
+                    Slide {currentSlide} / {totalSlides}
+                  </span>
 
                   <button
                     type="button"
                     disabled={currentSlide === totalSlides}
                     onClick={() => {
                       setCurrentSlide((p) => Math.min(totalSlides, p + 1));
-                      catalogTopRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      catalogTopRef.current?.scrollIntoView({
+                        behavior: 'smooth',
+                      });
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40 hover:border-[#10B981] transition-colors"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40"
                   >
                     <span>Selanjutnya</span>
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-4 h-4"/>
                   </button>
                 </div>
               )}
@@ -676,14 +1133,12 @@ export default function StorefrontClient({
           )}
         </section>
 
-        {/* ================================================================== */}
-        {/* LAYANAN KUSTOM RINGKAS (1 KARTU + 1 TOMBOL + DIATUR DARI ADMIN) */}
-        {/* ================================================================== */}
+        {/* LAYANAN KUSTOM RINGKAS */}
         <section className="bg-gradient-to-r from-[#ECFDF5] via-[#F8FAFC] to-white border border-emerald-200/80 rounded-2xl p-4 sm:p-5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-2 min-w-0 flex-1">
               <div className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#059669]">
-                <Sparkles className="w-4 h-4 shrink-0" />
+                <Sparkles className="w-4 h-4 shrink-0"/>
                 <span>Layanan Kustom RizzFlow</span>
               </div>
               <h2 className="text-base sm:text-lg font-extrabold text-[#0F172A] break-words">
@@ -693,14 +1148,13 @@ export default function StorefrontClient({
                 {customService.description}
               </p>
 
-              {/* Daftar Layanan Tersedia dalam Bentuk Chip Ringkas */}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {customService.services.map((srv, idx) => (
                   <span
                     key={idx}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-emerald-200 text-[11px] font-bold text-[#0F172A]"
                   >
-                    <Check className="w-3 h-3 text-[#10B981] shrink-0" />
+                    <Check className="w-3 h-3 text-[#10B981] shrink-0"/>
                     <span>{srv}</span>
                   </span>
                 ))}
@@ -711,40 +1165,40 @@ export default function StorefrontClient({
               <button
                 type="button"
                 onClick={handleJumpToCustomServiceCanvas}
-                className="w-full md:w-auto px-5 py-3 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm shadow-emerald-500/20 transition-all"
+                className="w-full md:w-auto px-5 py-3 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm transition-all"
               >
                 <span>Pesan Layanan Kustom</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4"/>
               </button>
             </div>
           </div>
         </section>
 
-        {/* ================================================================== */}
-        {/* CARA BELANJA KREATIF, BERANIMASI, HIDUP & RINGKAS */}
-        {/* ================================================================== */}
+        {/* CARA BELANJA KREATIF & BERANIMASI */}
         <section className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 overflow-hidden relative">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
             <div className="sm:max-w-[200px] shrink-0">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">
-                ⚡ Otomatis 24/7
+                ⚡ Otomatis &amp; Bergaransi
               </span>
               <h2 className="text-sm sm:text-base font-extrabold text-white mt-0.5">
-                3 Langkah Instan Belanja di RizzFlow
+                3 Langkah Mudah Belanja di RizzFlow
               </h2>
             </div>
 
             <div className="flex-1 grid grid-cols-3 gap-2 sm:gap-3 relative">
-              {/* Garis Animasi Penghubung di Belakang */}
               <div className="hidden sm:block absolute top-5 left-12 right-12 h-0.5 bg-slate-700 overflow-hidden">
                 <motion.div
                   animate={{ x: ['-100%', '100%'] }}
-                  transition={{ repeat: Infinity, duration: 2.8, ease: 'linear' }}
+                  transition={{
+                    repeat: Infinity,
+                    duration: 2.8,
+                    ease: 'linear',
+                  }}
                   className="w-1/2 h-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
                 />
               </div>
 
-              {/* Langkah 1 */}
               <motion.div
                 whileHover={{ y: -2 }}
                 className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
@@ -752,19 +1206,18 @@ export default function StorefrontClient({
                 <motion.div
                   animate={{ scale: [1, 1.08, 1] }}
                   transition={{ repeat: Infinity, duration: 2.2 }}
-                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5"
                 >
-                  <MousePointerClick className="w-4 h-4" />
+                  <MousePointerClick className="w-4 h-4"/>
                 </motion.div>
                 <span className="text-[11px] sm:text-xs font-extrabold text-white">
                   1. Pilih Produk
                 </span>
                 <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
-                  Masukkan keranjang
+                  Instan / Ambil Kode
                 </span>
               </motion.div>
 
-              {/* Langkah 2 */}
               <motion.div
                 whileHover={{ y: -2 }}
                 className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
@@ -772,19 +1225,18 @@ export default function StorefrontClient({
                 <motion.div
                   animate={{ scale: [1, 1.08, 1] }}
                   transition={{ repeat: Infinity, duration: 2.2, delay: 0.6 }}
-                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5"
                 >
-                  <QrCode className="w-4 h-4" />
+                  <QrCode className="w-4 h-4"/>
                 </motion.div>
                 <span className="text-[11px] sm:text-xs font-extrabold text-white">
                   2. Scan QRIS
                 </span>
                 <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
-                  Isi email & bayar
+                  Tanpa perlu daftar akun
                 </span>
               </motion.div>
 
-              {/* Langkah 3 */}
               <motion.div
                 whileHover={{ y: -2 }}
                 className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
@@ -792,29 +1244,26 @@ export default function StorefrontClient({
                 <motion.div
                   animate={{ scale: [1, 1.08, 1] }}
                   transition={{ repeat: Infinity, duration: 2.2, delay: 1.2 }}
-                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5"
                 >
-                  <MailCheck className="w-4 h-4" />
+                  <MailCheck className="w-4 h-4"/>
                 </motion.div>
                 <span className="text-[11px] sm:text-xs font-extrabold text-white">
-                  3. Cek Emailmu!
+                  3. Produk Diterima!
                 </span>
                 <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
-                  File langsung masuk
+                  Via Email &amp; Cek Kode
                 </span>
               </motion.div>
             </div>
           </div>
         </section>
 
-        {/* ================================================================== */}
-        {/* TANYA JAWAB (FAQ) & CANVAS KLAIM GARANSI / PESAN KHUSUS */}
-        {/* ================================================================== */}
+        {/* TANYA JAWAB (FAQ) & CANVAS KLAIM GARANSI */}
         <section className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          {/* Kolom Kiri: Tanya Jawab (FAQ) */}
           <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3.5">
-              <HelpCircle className="w-4 h-4 text-[#10B981]" />
+              <HelpCircle className="w-4 h-4 text-[#10B981]"/>
               <h2 className="text-base font-extrabold text-[#0F172A]">
                 Tanya Jawab (FAQ)
               </h2>
@@ -834,11 +1283,15 @@ export default function StorefrontClient({
                       className="w-full p-3.5 text-left flex items-center justify-between gap-2 font-bold text-xs text-[#0F172A]"
                     >
                       <span>{item.q}</span>
-                      <ChevronDown
-                        className={`w-4 h-4 text-[#64748B] shrink-0 transition-transform ${
-                          isOpen ? 'rotate-180 text-[#10B981]' : ''
-                        }`}
-                      />
+                      <span
+                        className={
+                          isOpen
+                            ? 'rotate-180 text-[#10B981] transition-transform shrink-0'
+                            : 'text-[#64748B] transition-transform shrink-0'
+                        }
+                      >
+                        <ChevronDown className="w-4 h-4"/>
+                      </span>
                     </button>
                     {isOpen && (
                       <div className="px-3.5 pb-3.5 text-xs text-[#64748B] leading-relaxed border-t border-slate-100 pt-2.5 bg-white">
@@ -851,15 +1304,14 @@ export default function StorefrontClient({
             </div>
           </div>
 
-          {/* Kolom Kanan: Canvas Formulir Klaim Garansi & Request Layanan Kustom */}
           <div
             ref={canvasFormRef}
-            className="lg:col-span-7 bg-white border border-emerald-200 rounded-2xl p-5 shadow-xs"
+            className="lg:col-span-7 bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm"
           >
             <div className="flex items-center gap-2 mb-1">
-              <MessageSquarePlus className="w-4 h-4 text-[#10B981]" />
+              <MessageSquarePlus className="w-4 h-4 text-[#10B981]"/>
               <h2 className="text-base font-extrabold text-[#0F172A]">
-                Canvas Klaim Garansi & Pesan Layanan Kustom
+                Canvas Klaim Garansi &amp; Pesan Layanan Kustom
               </h2>
             </div>
             <p className="text-xs text-[#64748B] mb-4">
@@ -934,7 +1386,7 @@ export default function StorefrontClient({
                   type="text"
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="No. Invoice (Jika Klaim Garansi)"
+                  placeholder="No. Invoice / Kode 4 Angka"
                   className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
                 />
               </div>
@@ -944,11 +1396,7 @@ export default function StorefrontClient({
                 required
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                placeholder={
-                  msgType === 'KLAIM_GARANSI'
-                    ? 'Jelaskan kendalamu (misal: Pembayaran QRIS sukses tapi file belum masuk)...'
-                    : 'Tuliskan detail website sederhana / template Excel kustom yang ingin kamu buat...'
-                }
+                placeholder="Tuliskan detail klaim atau pesanan layanan kustom kamu..."
                 className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
               />
 
@@ -961,9 +1409,9 @@ export default function StorefrontClient({
                   }`}
                 >
                   {msgFeedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <CheckCircle2 className="w-4 h-4 shrink-0"/>
                   ) : (
-                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <AlertCircle className="w-4 h-4 shrink-0"/>
                   )}
                   <span>{msgFeedback.text}</span>
                 </div>
@@ -972,16 +1420,16 @@ export default function StorefrontClient({
               <button
                 type="submit"
                 disabled={isSendingMsg}
-                className="w-full py-3 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs"
+                className="w-full py-3 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors"
               >
                 {isSendingMsg ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin"/>
                     <span>Mengirim...</span>
                   </>
                 ) : (
                   <>
-                    <Send className="w-4 h-4" />
+                    <Send className="w-4 h-4"/>
                     <span>Kirim Pesan ke Admin</span>
                   </>
                 )}
@@ -990,6 +1438,258 @@ export default function StorefrontClient({
           </div>
         </section>
       </main>
+
+      {/* MODAL AMBIL KODE PRE-ORDER 4 ANGKA (KHUSUS PRODUK TIPE LANGGANAN) */}
+      <AnimatePresence>
+        {subPreorderProduct && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeOverlayCleanly}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800">
+                  👑 Produk Langganan (Cek Stok Dulu)
+                </span>
+                <button
+                  type="button"
+                  onClick={closeOverlayCleanly}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5"/>
+                </button>
+              </div>
+
+              {!createdSubOrder ? (
+                <form
+                  onSubmit={handleCreateSubscriptionPreorder}
+                  className="space-y-4"
+                >
+                  <div>
+                    <h3 className="font-extrabold text-base text-[#0F172A]">
+                      {subPreorderProduct.title}
+                    </h3>
+                    <p className="text-sm font-extrabold text-[#10B981]">
+                      Rp{subPreorderProduct.price.toLocaleString('id-ID')}
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200 text-xs text-[#64748B] space-y-1.5 leading-relaxed">
+                    <p className="font-bold text-[#0F172A]">
+                      Cara Pembelian Produk Langganan:
+                    </p>
+                    <p>
+                      1. Ambil <strong>Kode Antrian 4 Angka</strong> di bawah ini (Tanpa bayar di awal).
+                    </p>
+                    <p>
+                      2. Admin akan mengecek ketersediaan stok (Maksimal 2 jam). Kamu juga bisa klik tombol WhatsApp/Telegram setelah kode muncul agar direspon lebih cepat.
+                    </p>
+                    <p>
+                      3. Saat stok dikonfirmasi tersedia, kamu akan menerima email dan bisa langsung membayar via QRIS menggunakan kode 4 angka tersebut.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      required
+                      value={subName}
+                      onChange={(e) => setSubName(e.target.value)}
+                      placeholder="Nama Kamu *"
+                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
+                    />
+                    <input
+                      type="email"
+                      required
+                      value={subEmail}
+                      onChange={(e) => setSubEmail(e.target.value)}
+                      placeholder="Alamat Email Aktif * (Untuk notif stok & akun)"
+                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={subContact}
+                      onChange={(e) => setSubContact(e.target.value)}
+                      placeholder="Nomor WhatsApp (Opsional)"
+                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
+                    />
+                  </div>
+
+                  {subModalError && (
+                    <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-[#EF4444]">
+                      {subModalError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isCreatingSub}
+                    className="w-full py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2"
+                  >
+                    {isCreatingSub ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin"/>
+                        <span>Membuat Kode 4 Angka...</span>
+                      </>
+                    ) : (
+                      <span>Ambil Kode Pre-Order (4 Angka) Sekarang</span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <div className="text-center space-y-4">
+                  <div className="p-4 rounded-2xl bg-[#ECFDF5] border-2 border-[#10B981]">
+                    <span className="text-xs font-bold text-[#059669] uppercase">
+                      Kode Pre-Order / Antrian Kamu:
+                    </span>
+                    <div className="text-4xl font-extrabold tracking-widest text-[#0F172A] my-2">
+                      {createdSubOrder.code}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(createdSubOrder.code)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs font-bold text-[#059669]"
+                    >
+                      <Copy className="w-3.5 h-3.5"/>
+                      <span>
+                        {copiedCode ? 'Kode Disalin!' : 'Salin Kode 4 Angka'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-900 space-y-1">
+                    <p className="font-extrabold">
+                      ⚠️ PENTING: Salin atau ingat 4 angka di atas!
+                    </p>
+                    <p>
+                      Gunakan kode <strong>{createdSubOrder.code}</strong> pada kotak <em>Cek Status Kode 4 Angka</em> di halaman depan untuk melihat konfirmasi stok dan melakukan pembayaran.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <p className="text-xs font-bold text-[#64748B]">
+                      Ingin direspon lebih cepat? Hubungi Admin langsung:
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      {getDirectWhatsAppUrl(
+                        `Halo Admin RizzFlow, saya sudah mengambil Kode Antrian *${createdSubOrder.code}* untuk produk *${createdSubOrder.product_title}*. Mohon info ketersediaan stoknya.`
+                      ) && (
+                        <a
+                          href={
+                            getDirectWhatsAppUrl(
+                              `Halo Admin RizzFlow, saya sudah mengambil Kode Antrian *${createdSubOrder.code}* untuk produk *${createdSubOrder.product_title}*. Mohon info ketersediaan stoknya.`
+                            )!
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-[#10B981] text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                        >
+                          <MessageCircle className="w-4 h-4"/>
+                          <span>Chat WhatsApp Admin</span>
+                        </a>
+                      )}
+
+                      {getDirectTelegramUrl() && (
+                        <a
+                          href={getDirectTelegramUrl()!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                        >
+                          <Send className="w-4 h-4"/>
+                          <span>Chat Telegram Admin</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={closeOverlayCleanly}
+                    className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-[#0F172A]"
+                  >
+                    Tutup &amp; Lihat Status di Halaman Depan
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL PENJELASAN DETAIL CARA BELI PRODUK LANGGANAN */}
+      <AnimatePresence>
+        {showSubGuideModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeOverlayCleanly}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="font-extrabold text-base text-[#0F172A]">
+                  Panduan Pembelian Produk Langganan
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeOverlayCleanly}
+                  className="p-1 rounded-lg text-[#64748B]"
+                >
+                  <X className="w-5 h-5"/>
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs text-[#0F172A] leading-relaxed">
+                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
+                  <strong>1. Cek Stok Dulu Tanpa Bayar di Awal</strong>
+                  <p className="text-[#64748B] mt-0.5">
+                    Pilih produk bertanda 👑 Langganan, masukkan emailmu, dan dapatkan <strong>Kode Antrian 4 Angka</strong>. Wajib salin/ingat 4 angka tersebut.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
+                  <strong>2. Tiga Status Kode Antrian Kamu</strong>
+                  <ul className="list-disc pl-4 mt-1 text-[#64748B] space-y-1">
+                    <li>
+                      <strong>Menunggu Jawaban Admin:</strong> Admin mengecek stok maksimal 2 jam. Lewat 2 jam tanpa jawaban otomatis dibatalkan.
+                    </li>
+                    <li>
+                      <strong>Stok Tersedia &amp; Pesanan Diproses:</strong> Saat stok tersedia, kamu mendapat notif email dan bisa bayar QRIS di kolom Cek Kode. Setelah bayar, pesanan diproses (tidak dapat dibatalkan) dan akun dikirim ke layar &amp; emailmu.
+                    </li>
+                    <li>
+                      <strong>Pesanan Dibatalkan:</strong> Jika stok sedang habis.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeOverlayCleanly}
+                className="w-full py-3 rounded-xl bg-[#10B981] text-white font-bold text-xs"
+              >
+                Saya Mengerti
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Tombol Keranjang Melayang di HP */}
       <AnimatePresence>
@@ -1006,19 +1706,19 @@ export default function StorefrontClient({
               className="w-full py-3.5 px-5 rounded-2xl bg-[#10B981] text-white shadow-lg shadow-emerald-600/30 flex items-center justify-between font-semibold text-sm"
             >
               <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5" />
+                <ShoppingBag className="w-5 h-5"/>
                 <span>{totalCartItems} Produk di Keranjang</span>
               </div>
               <div className="flex items-center gap-1 font-bold">
                 <span>Rp{totalCartPrice.toLocaleString('id-ID')}</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4"/>
               </div>
             </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Modal Detail Produk (Tinggi 2/3 Layar, Gambar Ikut Ter-scroll, Tombol Back HP Aktif) */}
+      {/* Modal Detail Produk (2/3 Layar, Gambar Ikut Ter-scroll) */}
       <AnimatePresence>
         {activeProduct && (
           <motion.div
@@ -1026,7 +1726,7 @@ export default function StorefrontClient({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={closeOverlayCleanly}
-            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overscroll-contain touch-none"
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overscroll-contain touch-none"
           >
             <motion.div
               initial={{ y: '100%' }}
@@ -1041,9 +1741,8 @@ export default function StorefrontClient({
                 type="button"
                 onClick={closeOverlayCleanly}
                 className="absolute top-3.5 right-3.5 z-20 w-9 h-9 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white border border-slate-200/70"
-                aria-label="Tutup Detail Produk"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5"/>
               </button>
 
               <div className="flex-1 overflow-y-auto overscroll-contain">
@@ -1060,12 +1759,14 @@ export default function StorefrontClient({
                         type="button"
                         onClick={() =>
                           setActiveImageIndex((prev) =>
-                            prev === 0 ? activeProductImages.length - 1 : prev - 1
+                            prev === 0
+                              ? activeProductImages.length - 1
+                              : prev - 1
                           )
                         }
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md"
                       >
-                        <ChevronLeft className="w-5 h-5" />
+                        <ChevronLeft className="w-5 h-5"/>
                       </button>
                       <span className="absolute left-3 bottom-3 px-2.5 py-1 rounded-full bg-slate-900/75 text-white text-xs font-bold">
                         {activeImageIndex + 1} / {activeProductImages.length}
@@ -1074,42 +1775,32 @@ export default function StorefrontClient({
                         type="button"
                         onClick={() =>
                           setActiveImageIndex((prev) =>
-                            prev === activeProductImages.length - 1 ? 0 : prev + 1
+                            prev === activeProductImages.length - 1
+                              ? 0
+                              : prev + 1
                           )
                         }
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md hover:bg-white"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 text-[#0F172A] flex items-center justify-center shadow-md"
                       >
-                        <ChevronRight className="w-5 h-5" />
+                        <ChevronRight className="w-5 h-5"/>
                       </button>
                     </>
                   )}
                 </div>
 
-                {activeProductImages.length > 1 && (
-                  <div className="flex gap-2 px-5 pt-3 overflow-x-auto no-scrollbar">
-                    {activeProductImages.map((imgUrl, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setActiveImageIndex(idx)}
-                        className={`w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 transition-all ${
-                          activeImageIndex === idx
-                            ? 'border-[#10B981] scale-105'
-                            : 'border-slate-200 opacity-70'
-                        }`}
-                      >
-                        <img src={imgUrl} alt="" className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 <div className="p-5 sm:p-6 space-y-3.5">
-                  {activeProduct.badge && (
-                    <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669]">
-                      {activeProduct.badge}
-                    </span>
-                  )}
+                  <span
+                    className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                      activeProductDeliverables?.product_type === 'LANGGANAN'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-[#ECFDF5] text-[#059669]'
+                    }`}
+                  >
+                    {activeProductDeliverables?.product_type === 'LANGGANAN'
+                      ? '👑 Produk Langganan (Cek Stok 4 Angka)'
+                      : activeProduct.badge || '⚡ Pengiriman File Instan'}
+                  </span>
+
                   <h3 className="text-xl font-extrabold text-[#0F172A] break-words">
                     {activeProduct.title}
                   </h3>
@@ -1118,17 +1809,21 @@ export default function StorefrontClient({
                     <span className="text-2xl font-extrabold text-[#10B981]">
                       Rp{activeProduct.price.toLocaleString('id-ID')}
                     </span>
-                    {activeProductOriginalPrice &&
-                      activeProductOriginalPrice > activeProduct.price && (
+                    {activeProductDeliverables?.original_price &&
+                      activeProductDeliverables.original_price >
+                        activeProduct.price && (
                         <span className="text-sm text-[#64748B] line-through">
-                          Rp{activeProductOriginalPrice.toLocaleString('id-ID')}
+                          Rp
+                          {activeProductDeliverables.original_price.toLocaleString(
+                            'id-ID'
+                          )}
                         </span>
                       )}
                   </div>
 
                   <div className="pt-3 border-t border-slate-100">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2">
-                      Deskripsi Produk Digital
+                      Deskripsi Produk
                     </h4>
                     <p className="text-sm text-[#0F172A] whitespace-pre-line leading-relaxed break-words">
                       {activeProduct.description}
@@ -1141,13 +1836,21 @@ export default function StorefrontClient({
                 <button
                   type="button"
                   onClick={() => {
-                    handleAddToCart(activeProduct);
-                    setActiveProduct(null);
-                    setIsCartOpen(true);
+                    const prod = activeProduct;
+                    handleAddToCart(prod);
+                    if (
+                      parseProductDeliverables(prod.file_path).product_type !==
+                      'LANGGANAN'
+                    ) {
+                      setActiveProduct(null);
+                      setIsCartOpen(true);
+                    }
                   }}
                   className="w-full py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-sm transition-colors shadow-sm"
                 >
-                  Tambah ke Keranjang & Lihat
+                  {activeProductDeliverables?.product_type === 'LANGGANAN'
+                    ? 'Cek Stok & Ambil Kode Antrian (4 Angka)'
+                    : 'Tambah ke Keranjang & Lihat'}
                 </button>
               </div>
             </motion.div>
@@ -1163,7 +1866,7 @@ export default function StorefrontClient({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={closeOverlayCleanly}
-            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex justify-end overscroll-contain"
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex justify-end overscroll-contain"
           >
             <motion.div
               initial={{ x: '100%' }}
@@ -1175,27 +1878,26 @@ export default function StorefrontClient({
             >
               <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <ShoppingBag className="w-5 h-5 text-[#10B981]" />
-                  <h3 className="font-bold text-lg text-[#0F172A]">Keranjang Belanja</h3>
+                  <ShoppingBag className="w-5 h-5 text-[#10B981]"/>
+                  <h3 className="font-bold text-lg text-[#0F172A]">
+                    Keranjang Belanja
+                  </h3>
                 </div>
                 <button
                   type="button"
                   onClick={closeOverlayCleanly}
-                  className="p-2 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F8FAFC]"
+                  className="p-2 rounded-lg text-[#64748B] hover:text-[#0F172A]"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5 h-5"/>
                 </button>
               </div>
 
               <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4">
                 {cart.length === 0 ? (
                   <div className="text-center py-16">
-                    <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-3 stroke-[1.5]" />
+                    <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-3 stroke-[1.5]"/>
                     <p className="font-semibold text-[#0F172A] mb-1">
                       Keranjang masih kosong
-                    </p>
-                    <p className="text-xs text-[#64748B]">
-                      Silakan pilih produk digital yang kamu butuhkan dari katalog.
                     </p>
                   </div>
                 ) : (
@@ -1225,32 +1927,38 @@ export default function StorefrontClient({
                             <div className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1">
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQuantity(item.product.id, -1)}
-                                className="text-[#64748B] hover:text-[#0F172A]"
+                                onClick={() =>
+                                  handleUpdateQuantity(item.product.id, -1)
+                                }
+                                className="text-[#64748B]"
                               >
-                                <Minus className="w-3.5 h-3.5" />
+                                <Minus className="w-3.5 h-3.5"/>
                               </button>
                               <span className="text-xs font-bold w-5 text-center">
                                 {item.quantity}
                               </span>
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQuantity(item.product.id, 1)}
-                                className="text-[#64748B] hover:text-[#0F172A]"
+                                onClick={() =>
+                                  handleUpdateQuantity(item.product.id, 1)
+                                }
+                                className="text-[#64748B]"
                               >
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-3.5 h-3.5"/>
                               </button>
                             </div>
 
                             <button
                               type="button"
                               onClick={() =>
-                                handleUpdateQuantity(item.product.id, -item.quantity)
+                                handleUpdateQuantity(
+                                  item.product.id,
+                                  -item.quantity
+                                )
                               }
                               className="text-[#64748B] hover:text-[#EF4444] p-1"
-                              title="Hapus produk"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4"/>
                             </button>
                           </div>
                         </div>
@@ -1263,7 +1971,9 @@ export default function StorefrontClient({
               {cart.length > 0 && (
                 <div className="p-5 border-t border-slate-100 bg-[#F8FAFC] space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-[#64748B]">Subtotal Pesanan</span>
+                    <span className="text-sm text-[#64748B]">
+                      Subtotal Pesanan
+                    </span>
                     <span className="text-lg font-extrabold text-[#0F172A]">
                       Rp{totalCartPrice.toLocaleString('id-ID')}
                     </span>
@@ -1274,10 +1984,10 @@ export default function StorefrontClient({
                       setIsCartOpen(false);
                       router.push('/checkout');
                     }}
-                    className="w-full py-3.5 px-5 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 transition-colors"
+                    className="w-full py-3.5 px-5 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-sm flex items-center justify-center gap-2"
                   >
                     <span>Lanjut ke Checkout</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <ArrowRight className="w-4 h-4"/>
                   </button>
                 </div>
               )}
@@ -1286,7 +1996,6 @@ export default function StorefrontClient({
         )}
       </AnimatePresence>
 
-      {/* Footer dengan Link "laporkan" */}
       <footer className="border-t border-slate-100 py-5 text-xs text-[#64748B] bg-[#F8FAFC] mt-8">
         <div className="max-w-6xl mx-auto px-4 flex flex-row items-center justify-between gap-2">
           <span>

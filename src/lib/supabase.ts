@@ -40,7 +40,9 @@ export async function generateProductSignedUrl(filePath: string): Promise<string
     });
 
   if (error || !data?.signedUrl) {
-    throw new Error(`Gagal membuat link unduhan untuk file ${filePath}: ${error?.message || 'Tidak diketahui'}`);
+    throw new Error(
+      `Gagal membuat link unduhan untuk file ${filePath}: ${error?.message || 'Tidak diketahui'}`
+    );
   }
 
   return data.signedUrl;
@@ -57,7 +59,9 @@ export function parseThumbnails(rawThumbnailUrl: string): string[] {
     try {
       const parsed = JSON.parse(trimmed) as unknown;
       if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+        return parsed.filter(
+          (item): item is string => typeof item === 'string' && item.length > 0
+        );
       }
     } catch {
       return [trimmed];
@@ -67,17 +71,29 @@ export function parseThumbnails(rawThumbnailUrl: string): string[] {
   return [trimmed];
 }
 
+export type ProductSaleType = 'INSTAN' | 'LANGGANAN';
+
 export interface ProductDeliverables {
   files: string[];
   links: string[];
   original_price?: number | null;
+  product_type?: ProductSaleType;
+  subscription_duration?: string | null;
 }
 
 /**
- * Membaca isi file_path produk (mendukung multi-file, link Google Drive, dan Harga Coret).
+ * Membaca isi file_path produk (mendukung multi-file, link Drive, Harga Coret, & Tipe Produk Langganan).
  */
 export function parseProductDeliverables(rawFilePath: string): ProductDeliverables {
-  if (!rawFilePath) return { files: [], links: [], original_price: null };
+  if (!rawFilePath) {
+    return {
+      files: [],
+      links: [],
+      original_price: null,
+      product_type: 'INSTAN',
+      subscription_duration: null,
+    };
+  }
   const trimmed = rawFilePath.trim();
 
   if (trimmed.startsWith('{')) {
@@ -86,28 +102,72 @@ export function parseProductDeliverables(rawFilePath: string): ProductDeliverabl
         files?: unknown;
         links?: unknown;
         original_price?: unknown;
+        product_type?: unknown;
+        subscription_duration?: unknown;
       };
       const files = Array.isArray(parsed.files)
-        ? parsed.files.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
+        ? parsed.files.filter(
+            (f): f is string => typeof f === 'string' && f.trim().length > 0
+          )
         : [];
       const links = Array.isArray(parsed.links)
-        ? parsed.links.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+        ? parsed.links.filter(
+            (l): l is string => typeof l === 'string' && l.trim().length > 0
+          )
         : [];
       const original_price =
         typeof parsed.original_price === 'number' && parsed.original_price > 0
           ? parsed.original_price
           : null;
-      return { files, links, original_price };
+      const product_type: ProductSaleType =
+        parsed.product_type === 'LANGGANAN' ? 'LANGGANAN' : 'INSTAN';
+      const subscription_duration =
+        typeof parsed.subscription_duration === 'string' &&
+        parsed.subscription_duration.trim().length > 0
+          ? parsed.subscription_duration.trim()
+          : null;
+
+      return {
+        files,
+        links,
+        original_price,
+        product_type,
+        subscription_duration,
+      };
     } catch {
-      return { files: [trimmed], links: [], original_price: null };
+      return {
+        files: [trimmed],
+        links: [],
+        original_price: null,
+        product_type: 'INSTAN',
+        subscription_duration: null,
+      };
     }
   }
 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return { files: [], links: [trimmed], original_price: null };
+    return {
+      files: [],
+      links: [trimmed],
+      original_price: null,
+      product_type: 'INSTAN',
+      subscription_duration: null,
+    };
   }
 
-  return { files: [trimmed], links: [], original_price: null };
+  return {
+    files: [trimmed],
+    links: [],
+    original_price: null,
+    product_type: 'INSTAN',
+    subscription_duration: null,
+  };
+}
+
+export interface DeliveryLinkItem {
+  productTitle: string;
+  quantity: number;
+  signedDownloadUrl: string;
 }
 
 /**
@@ -117,9 +177,9 @@ export async function buildProductDeliveryItems(params: {
   productTitle: string;
   quantity: number;
   rawFilePath: string;
-}): Promise<{ productTitle: string; quantity: number; signedDownloadUrl: string }[]> {
+}): Promise<DeliveryLinkItem[]> {
   const { files, links } = parseProductDeliverables(params.rawFilePath);
-  const results: { productTitle: string; quantity: number; signedDownloadUrl: string }[] = [];
+  const results: DeliveryLinkItem[] = [];
   const totalItems = files.length + links.length;
 
   for (let i = 0; i < files.length; i++) {
@@ -153,7 +213,7 @@ export async function buildProductDeliveryItems(params: {
 }
 
 // ============================================================================
-// PENYIMPANAN PESAN PELANGGAN & KONFIGURASI LAYANAN KUSTOM (TANPA UBAH SQL)
+// PENYIMPANAN PESAN, LAYANAN KUSTOM, & ANTRIAN LANGGANAN 4 ANGKA
 // ============================================================================
 
 export interface CustomerSupportMessage {
@@ -172,6 +232,8 @@ export interface CustomServiceConfig {
   title: string;
   description: string;
   services: string[];
+  admin_whatsapp?: string;
+  admin_telegram?: string;
 }
 
 export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
@@ -184,10 +246,40 @@ export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
     'Slide Presentasi PPT & Dokumen',
     'Sistem Workspace Notion & Tools AI',
   ],
+  admin_whatsapp: '',
+  admin_telegram: '',
 };
+
+export type SubscriptionOrderStatus =
+  | 'MENUNGGU_ADMIN'
+  | 'STOK_TERSEDIA'
+  | 'DIPROSES'
+  | 'DIBATALKAN';
+
+export interface SubscriptionOrder {
+  id: string;
+  code: string;
+  product_id: string;
+  product_title: string;
+  product_price: number;
+  product_thumbnail: string;
+  customer_name: string;
+  customer_email: string;
+  customer_contact: string;
+  status: SubscriptionOrderStatus;
+  admin_note: string;
+  delivered_account: string;
+  qris_string: string | null;
+  invoice_number: string | null;
+  payment_status: 'UNPAID' | 'PENDING' | 'PAID';
+  created_at: string;
+  expires_wait_at: string;
+  updated_at: string;
+}
 
 const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
 const CUSTOM_SERVICES_STORAGE_FILE = '__rizzflow_custom_services.json';
+const SUBSCRIPTIONS_STORAGE_FILE = '__rizzflow_subscription_orders.json';
 
 export async function getStoredCustomerMessages(): Promise<CustomerSupportMessage[]> {
   const supabaseAdmin = getSupabaseAdmin();
@@ -195,9 +287,7 @@ export async function getStoredCustomerMessages(): Promise<CustomerSupportMessag
     .from('digital-products')
     .download(MESSAGES_STORAGE_FILE);
 
-  if (error || !data) {
-    return [];
-  }
+  if (error || !data) return [];
 
   try {
     const text = await data.text();
@@ -237,11 +327,14 @@ export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfi
     const parsed = JSON.parse(text) as Partial<CustomServiceConfig>;
     return {
       title: parsed.title || DEFAULT_CUSTOM_SERVICE_CONFIG.title,
-      description: parsed.description || DEFAULT_CUSTOM_SERVICE_CONFIG.description,
+      description:
+        parsed.description || DEFAULT_CUSTOM_SERVICE_CONFIG.description,
       services:
         Array.isArray(parsed.services) && parsed.services.length > 0
           ? parsed.services
           : DEFAULT_CUSTOM_SERVICE_CONFIG.services,
+      admin_whatsapp: parsed.admin_whatsapp || '',
+      admin_telegram: parsed.admin_telegram || '',
     };
   } catch {
     return DEFAULT_CUSTOM_SERVICE_CONFIG;
@@ -257,6 +350,37 @@ export async function saveStoredCustomServiceConfig(
   await supabaseAdmin.storage
     .from('digital-products')
     .upload(CUSTOM_SERVICES_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
+      contentType: 'application/json',
+      upsert: true,
+    });
+}
+
+export async function getStoredSubscriptionOrders(): Promise<SubscriptionOrder[]> {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin.storage
+      .from('digital-products')
+      .download(SUBSCRIPTIONS_STORAGE_FILE);
+
+    if (error || !data) return [];
+
+    const text = await data.text();
+    const parsed = JSON.parse(text) as unknown;
+    return Array.isArray(parsed) ? (parsed as SubscriptionOrder[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStoredSubscriptionOrders(
+  orders: SubscriptionOrder[]
+): Promise<void> {
+  const supabaseAdmin = getSupabaseAdmin();
+  const payload = JSON.stringify(orders, null, 2);
+
+  await supabaseAdmin.storage
+    .from('digital-products')
+    .upload(SUBSCRIPTIONS_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
       contentType: 'application/json',
       upsert: true,
     });
