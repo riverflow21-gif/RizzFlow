@@ -47,7 +47,7 @@ export async function generateProductSignedUrl(filePath: string): Promise<string
 }
 
 /**
- * Membaca daftar URL gambar thumbnail (mendukung 1 gambar lama maupun banyak gambar baru).
+ * Membaca daftar URL gambar thumbnail (mendukung 1 gambar maupun banyak gambar).
  */
 export function parseThumbnails(rawThumbnailUrl: string): string[] {
   if (!rawThumbnailUrl) return [];
@@ -70,40 +70,48 @@ export function parseThumbnails(rawThumbnailUrl: string): string[] {
 export interface ProductDeliverables {
   files: string[];
   links: string[];
+  original_price?: number | null;
 }
 
 /**
- * Membaca isi file_path produk (mendukung format lama 1 file maupun format baru banyak file + link Drive).
+ * Membaca isi file_path produk (mendukung multi-file, link Google Drive, dan Harga Coret).
  */
 export function parseProductDeliverables(rawFilePath: string): ProductDeliverables {
-  if (!rawFilePath) return { files: [], links: [] };
+  if (!rawFilePath) return { files: [], links: [], original_price: null };
   const trimmed = rawFilePath.trim();
 
   if (trimmed.startsWith('{')) {
     try {
-      const parsed = JSON.parse(trimmed) as { files?: unknown; links?: unknown };
+      const parsed = JSON.parse(trimmed) as {
+        files?: unknown;
+        links?: unknown;
+        original_price?: unknown;
+      };
       const files = Array.isArray(parsed.files)
         ? parsed.files.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
         : [];
       const links = Array.isArray(parsed.links)
         ? parsed.links.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
         : [];
-      return { files, links };
+      const original_price =
+        typeof parsed.original_price === 'number' && parsed.original_price > 0
+          ? parsed.original_price
+          : null;
+      return { files, links, original_price };
     } catch {
-      return { files: [trimmed], links: [] };
+      return { files: [trimmed], links: [], original_price: null };
     }
   }
 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return { files: [], links: [trimmed] };
+    return { files: [], links: [trimmed], original_price: null };
   }
 
-  return { files: [trimmed], links: [] };
+  return { files: [trimmed], links: [], original_price: null };
 }
 
 /**
- * Menghasilkan daftar tombol tautan unduhan (Signed URL untuk file + Link langsung untuk Google Drive)
- * yang siap dikirimkan ke email pembeli.
+ * Menghasilkan daftar tombol tautan unduhan untuk dikirimkan ke email pembeli.
  */
 export async function buildProductDeliveryItems(params: {
   productTitle: string;
@@ -114,7 +122,6 @@ export async function buildProductDeliveryItems(params: {
   const results: { productTitle: string; quantity: number; signedDownloadUrl: string }[] = [];
   const totalItems = files.length + links.length;
 
-  // 1. Buat Signed URL untuk setiap file yang diunggah ke Supabase Storage
   for (let i = 0; i < files.length; i++) {
     const signedUrl = await generateProductSignedUrl(files[i]);
     const label =
@@ -129,7 +136,6 @@ export async function buildProductDeliveryItems(params: {
     });
   }
 
-  // 2. Masukkan setiap Link Eksternal (Google Drive, dll.)
   for (let j = 0; j < links.length; j++) {
     const label =
       links.length > 1 || files.length > 0
@@ -144,4 +150,55 @@ export async function buildProductDeliveryItems(params: {
   }
 
   return results;
+}
+
+// ============================================================================
+// PENYIMPANAN PESAN KLAIM GARANSI & PESANAN LAYANAN KHUSUS (TANPA UBAH SQL)
+// ============================================================================
+
+export interface CustomerSupportMessage {
+  id: string;
+  type: 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
+  sender_name: string;
+  sender_email: string;
+  sender_contact: string; // No WA / Telegram pembeli (opsional)
+  invoice_number: string;
+  message: string;
+  status: 'BARU' | 'SELESAI';
+  created_at: string;
+}
+
+const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
+
+export async function getStoredCustomerMessages(): Promise<CustomerSupportMessage[]> {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data, error } = await supabaseAdmin.storage
+    .from('digital-products')
+    .download(MESSAGES_STORAGE_FILE);
+
+  if (error || !data) {
+    return [];
+  }
+
+  try {
+    const text = await data.text();
+    const parsed = JSON.parse(text) as unknown;
+    return Array.isArray(parsed) ? (parsed as CustomerSupportMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStoredCustomerMessages(
+  messages: CustomerSupportMessage[]
+): Promise<void> {
+  const supabaseAdmin = getSupabaseAdmin();
+  const payload = JSON.stringify(messages, null, 2);
+
+  await supabaseAdmin.storage
+    .from('digital-products')
+    .upload(MESSAGES_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
+      contentType: 'application/json',
+      upsert: true,
+    });
 }

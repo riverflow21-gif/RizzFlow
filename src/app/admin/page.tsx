@@ -7,6 +7,7 @@ import {
   supabase,
   parseThumbnails,
   parseProductDeliverables,
+  CustomerSupportMessage,
 } from '@/lib/supabase';
 import {
   Package,
@@ -26,6 +27,8 @@ import {
   Eye,
   EyeOff,
   Link as LinkIcon,
+  Inbox,
+  Check,
 } from 'lucide-react';
 import {
   Category,
@@ -35,7 +38,13 @@ import {
   StoreSettings,
 } from '@/types';
 
-type AdminTab = 'orders' | 'products' | 'categories' | 'promos' | 'settings';
+type AdminTab =
+  | 'orders'
+  | 'products'
+  | 'categories'
+  | 'promos'
+  | 'messages'
+  | 'settings';
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -53,6 +62,7 @@ export default function AdminDashboardPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [promos, setPromos] = useState<PromoCode[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [supportMessages, setSupportMessages] = useState<CustomerSupportMessage[]>([]);
   const [settings, setSettings] = useState<StoreSettings>({
     id: 1,
     store_name: 'RizzFlow',
@@ -61,16 +71,16 @@ export default function AdminDashboardPage() {
     updated_at: '',
   });
 
-  // State Form Tambah Produk Baru (Mendukung Banyak Gambar, Banyak File, & Link Google Drive)
+  // State Form Tambah Produk Baru (Mendukung Harga Coret, Multi Thumbnail, Multi File, & Link Drive)
   const [prodTitle, setProdTitle] = useState<string>('');
   const [prodCategoryId, setProdCategoryId] = useState<string>('');
   const [prodPrice, setProdPrice] = useState<string>('');
+  const [prodOriginalPrice, setProdOriginalPrice] = useState<string>('');
   const [prodBadge, setProdBadge] = useState<string>('');
   const [prodDesc, setProdDesc] = useState<string>('');
   const [thumbnailFiles, setThumbnailFiles] = useState<File[]>([]);
   const [digitalFiles, setDigitalFiles] = useState<File[]>([]);
   const [productLinks, setProductLinks] = useState<string[]>(['']);
-  // Key khusus untuk me-reset input file sampai bersih setelah produk disimpan
   const [fileInputKey, setFileInputKey] = useState<number>(0);
   const [isSavingProduct, setIsSavingProduct] = useState<boolean>(false);
 
@@ -95,13 +105,11 @@ export default function AdminDashboardPage() {
     setTimeout(() => setFeedback(null), 5000);
   };
 
-  // Fungsi Logout Penuh (Memutus sesi di semua perangkat & mewajibkan password saat masuk lagi)
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut({ scope: 'global' });
     router.replace('/admin/login');
   }, [router]);
 
-  // Auto-Logout otomatis jika halaman Admin didiamkan tanpa aktivitas selama 30 menit
   useEffect(() => {
     let inactivityTimer: ReturnType<typeof setTimeout>;
 
@@ -109,7 +117,7 @@ export default function AdminDashboardPage() {
       clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
         handleLogout();
-      }, 30 * 60 * 1000); // 30 Menit
+      }, 30 * 60 * 1000);
     };
 
     window.addEventListener('mousemove', resetInactivityTimer);
@@ -125,36 +133,58 @@ export default function AdminDashboardPage() {
     };
   }, [handleLogout]);
 
-  const fetchAllAdminData = useCallback(async () => {
-    const [prodRes, catRes, promoRes, orderRes, setRes] = await Promise.all([
-      supabase
-        .from('products')
-        .select('*, categories(*)')
-        .order('created_at', { ascending: false }),
-      supabase.from('categories').select('*').order('name', { ascending: true }),
-      supabase
-        .from('promo_codes')
-        .select('*')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('orders')
-        .select('*, order_items(*)')
-        .order('created_at', { ascending: false }),
-      supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
-    ]);
+  const fetchAllAdminData = useCallback(
+    async (tokenOverride?: string) => {
+      const tokenToUse = tokenOverride || accessToken;
+      const [prodRes, catRes, promoRes, orderRes, setRes] = await Promise.all([
+        supabase
+          .from('products')
+          .select('*, categories(*)')
+          .order('created_at', { ascending: false }),
+        supabase.from('categories').select('*').order('name', { ascending: true }),
+        supabase
+          .from('promo_codes')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('orders')
+          .select('*, order_items(*)')
+          .order('created_at', { ascending: false }),
+        supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
+      ]);
 
-    if (prodRes.data) setProducts(prodRes.data as Product[]);
-    if (catRes.data) {
-      const catList = catRes.data as Category[];
-      setCategories(catList);
-      if (catList.length > 0 && !prodCategoryId) {
-        setProdCategoryId(catList[0].id);
+      if (prodRes.data) setProducts(prodRes.data as Product[]);
+      if (catRes.data) {
+        const catList = catRes.data as Category[];
+        setCategories(catList);
+        if (catList.length > 0 && !prodCategoryId) {
+          setProdCategoryId(catList[0].id);
+        }
       }
-    }
-    if (promoRes.data) setPromos(promoRes.data as PromoCode[]);
-    if (orderRes.data) setOrders(orderRes.data as Order[]);
-    if (setRes.data) setSettings(setRes.data as StoreSettings);
-  }, [prodCategoryId]);
+      if (promoRes.data) setPromos(promoRes.data as PromoCode[]);
+      if (orderRes.data) setOrders(orderRes.data as Order[]);
+      if (setRes.data) setSettings(setRes.data as StoreSettings);
+
+      if (tokenToUse) {
+        try {
+          const msgRes = await fetch('/api/messages', {
+            headers: { Authorization: `Bearer ${tokenToUse}` },
+          });
+          if (msgRes.ok) {
+            const msgData = (await msgRes.json()) as {
+              messages?: CustomerSupportMessage[];
+            };
+            if (msgData.messages) {
+              setSupportMessages(msgData.messages);
+            }
+          }
+        } catch (e) {
+          console.error('Gagal memuat pesan pelanggan:', e);
+        }
+      }
+    },
+    [prodCategoryId, accessToken]
+  );
 
   useEffect(() => {
     const verifyAdmin = async () => {
@@ -163,7 +193,8 @@ export default function AdminDashboardPage() {
         router.replace('/admin/login');
         return;
       }
-      setAccessToken(data.session.access_token);
+      const token = data.session.access_token;
+      setAccessToken(token);
       setAdminEmail(data.session.user.email || 'Admin');
 
       const now = new Date();
@@ -171,7 +202,7 @@ export default function AdminDashboardPage() {
       setPromoStartsAt(now.toISOString().slice(0, 16));
       setPromoExpiresAt(nextWeek.toISOString().slice(0, 16));
 
-      await fetchAllAdminData();
+      await fetchAllAdminData(token);
       setIsLoadingInitial(false);
     };
 
@@ -179,7 +210,7 @@ export default function AdminDashboardPage() {
   }, [router, fetchAllAdminData]);
 
   // ==========================================================================
-  // 1. LOGIKA MANAJEMEN PRODUK (MULTI THUMBNAIL, MULTI FILE, & LINK DRIVE)
+  // 1. LOGIKA MANAJEMEN PRODUK (HARGA CORET, MULTI THUMBNAIL, FILE & LINK)
   // ==========================================================================
   const handleAddLinkRow = () => {
     setProductLinks((prev) => [...prev, '']);
@@ -221,7 +252,6 @@ export default function AdminDashboardPage() {
       const uploadedThumbUrls: string[] = [];
       const uploadedFilePaths: string[] = [];
 
-      // A. Unggah Semua Gambar Sampul ke Public Bucket 'product-thumbnails'
       for (let i = 0; i < thumbnailFiles.length; i++) {
         const file = thumbnailFiles[i];
         const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -242,7 +272,6 @@ export default function AdminDashboardPage() {
         uploadedThumbUrls.push(publicUrlData.publicUrl);
       }
 
-      // B. Unggah Semua File Produk (Jika Ada) ke Private Bucket 'digital-products'
       for (let j = 0; j < digitalFiles.length; j++) {
         const dFile = digitalFiles[j];
         const cleanName = dFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -259,16 +288,19 @@ export default function AdminDashboardPage() {
         uploadedFilePaths.push(digitalPath);
       }
 
-      // C. Simpan URL Thumbnail (Jika 1 gambar simpan biasa, jika >1 simpan JSON array)
       const thumbnailPayload =
         uploadedThumbUrls.length === 1
           ? uploadedThumbUrls[0]
           : JSON.stringify(uploadedThumbUrls);
 
-      // D. Simpan File & Link Eksternal dalam format JSON terstruktur
+      const numericOriginalPrice = prodOriginalPrice
+        ? Math.max(0, Number(prodOriginalPrice) || 0)
+        : null;
+
       const deliverablesPayload = JSON.stringify({
         files: uploadedFilePaths,
         links: validLinks,
+        original_price: numericOriginalPrice,
       });
 
       const { error: insertErr } = await supabase.from('products').insert({
@@ -286,9 +318,9 @@ export default function AdminDashboardPage() {
         throw new Error(`Gagal menyimpan data produk: ${insertErr.message}`);
       }
 
-      // Reset seluruh form termasuk mengosongkan input file (fileInputKey + 1)
       setProdTitle('');
       setProdPrice('');
+      setProdOriginalPrice('');
       setProdBadge('');
       setProdDesc('');
       setThumbnailFiles([]);
@@ -333,7 +365,7 @@ export default function AdminDashboardPage() {
   };
 
   // ==========================================================================
-  // 2. LOGIKA MANAJEMEN KATEGORI
+  // 2. LOGIKA MANAJEMEN KATEGORI & KODE PROMO
   // ==========================================================================
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -369,17 +401,12 @@ export default function AdminDashboardPage() {
 
   const handleDeleteCategory = async (id: string) => {
     const { error } = await supabase.from('categories').delete().eq('id', id);
-    if (error) {
-      showMessage('error', `Gagal menghapus kategori: ${error.message}`);
-    } else {
+    if (!error) {
       await fetchAllAdminData();
       showMessage('success', 'Kategori berhasil dihapus.');
     }
   };
 
-  // ==========================================================================
-  // 3. LOGIKA MANAJEMEN KODE PROMO DETAIL
-  // ==========================================================================
   const handleCreatePromo = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingPromo(true);
@@ -433,8 +460,38 @@ export default function AdminDashboardPage() {
   };
 
   // ==========================================================================
-  // 4. LOGIKA RIWAYAT TRANSAKSI & KIRIM ULANG EMAIL
+  // 3. LOGIKA KELOLA PESAN KLAIM GARANSI & PESANAN LAYANAN KHUSUS
   // ==========================================================================
+  const handleToggleMessageStatus = async (msg: CustomerSupportMessage) => {
+    const nextStatus = msg.status === 'BARU' ? 'SELESAI' : 'BARU';
+    const res = await fetch('/api/messages', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ id: msg.id, status: nextStatus }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { messages?: CustomerSupportMessage[] };
+      if (data.messages) setSupportMessages(data.messages);
+    }
+  };
+
+  const handleDeleteSupportMessage = async (id: string) => {
+    const res = await fetch(`/api/messages?id=${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { messages?: CustomerSupportMessage[] };
+      if (data.messages) setSupportMessages(data.messages);
+      showMessage('success', 'Pesan berhasil dihapus.');
+    }
+  };
+
   const handleResendDownloadEmail = async (orderId: string) => {
     setResendingOrderId(orderId);
     try {
@@ -463,9 +520,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // ==========================================================================
-  // 5. LOGIKA PENGATURAN TOKO DASAR
-  // ==========================================================================
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingSettings(true);
@@ -507,6 +561,10 @@ export default function AdminDashboardPage() {
     .filter((o) => o.payment_status === 'PAID')
     .reduce((acc, o) => acc + o.final_amount, 0);
 
+  const unreadMessagesCount = supportMessages.filter(
+    (m) => m.status === 'BARU'
+  ).length;
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex flex-col md:flex-row overflow-x-hidden">
       {/* Sidebar Navigasi Kiri (Desktop) & Header Atas (Mobile) */}
@@ -538,7 +596,6 @@ export default function AdminDashboardPage() {
                 <ExternalLink className="w-4 h-4" />
               </Link>
 
-              {/* Tombol Keluar (Logout) untuk Layar HP agar selalu terlihat jelas */}
               <button
                 type="button"
                 onClick={handleLogout}
@@ -551,7 +608,6 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Menu Navigasi Tab Admin */}
           <nav className="flex md:flex-col gap-1.5 overflow-x-auto no-scrollbar pb-1 md:pb-0">
             <button
               type="button"
@@ -564,6 +620,45 @@ export default function AdminDashboardPage() {
             >
               <Package className="w-4 h-4 shrink-0" />
               <span>Produk ({products.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('messages')}
+              className={`flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
+                activeTab === 'messages'
+                  ? 'bg-[#10B981] text-white'
+                  : 'text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Inbox className="w-4 h-4 shrink-0" />
+                <span>Pesan & Klaim</span>
+              </div>
+              {unreadMessagesCount > 0 && (
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full ${
+                    activeTab === 'messages'
+                      ? 'bg-white text-[#059669]'
+                      : 'bg-rose-500 text-white'
+                  }`}
+                >
+                  {unreadMessagesCount} Baru
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('orders')}
+              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
+                activeTab === 'orders'
+                  ? 'bg-[#10B981] text-white'
+                  : 'text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4 shrink-0" />
+              <span>Riwayat Pembelian ({orders.length})</span>
             </button>
 
             <button
@@ -594,19 +689,6 @@ export default function AdminDashboardPage() {
 
             <button
               type="button"
-              onClick={() => setActiveTab('orders')}
-              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
-                activeTab === 'orders'
-                  ? 'bg-[#10B981] text-white'
-                  : 'text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'
-              }`}
-            >
-              <ShoppingBag className="w-4 h-4 shrink-0" />
-              <span>Riwayat Pembelian ({orders.length})</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setActiveTab('settings')}
               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-colors ${
                 activeTab === 'settings'
@@ -632,7 +714,7 @@ export default function AdminDashboardPage() {
         </div>
       </aside>
 
-      {/* Area Konten Utama Admin (Anti Geser Samping di HP dengan min-w-0 & overflow-x-hidden) */}
+      {/* Area Konten Utama Admin */}
       <main className="flex-1 min-w-0 p-4 sm:p-8 max-w-5xl w-full mx-auto overflow-x-hidden">
         {/* Ringkasan Statistik Cepat */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 mb-6">
@@ -654,15 +736,14 @@ export default function AdminDashboardPage() {
           </div>
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 col-span-2 sm:col-span-1 min-w-0">
             <span className="text-xs text-[#64748B] font-semibold">
-              Produk Aktif di Katalog
+              Pesan & Klaim Masuk
             </span>
             <div className="text-lg sm:text-2xl font-extrabold text-[#0F172A] mt-1">
-              {products.filter((p) => p.is_active).length} Produk
+              {unreadMessagesCount} Belum Dibaca
             </div>
           </div>
         </div>
 
-        {/* Notifikasi Sukses / Error */}
         {feedback && (
           <div
             className={`mb-6 p-4 rounded-xl border text-xs sm:text-sm font-bold flex items-center gap-2.5 break-words ${
@@ -681,7 +762,7 @@ export default function AdminDashboardPage() {
         )}
 
         {/* ================================================================== */}
-        {/* TAB 1: MANAJEMEN PRODUK DIGITAL */}
+        {/* TAB 1: MANAJEMEN PRODUK DIGITAL (DENGAN HARGA CORET) */}
         {/* ================================================================== */}
         {activeTab === 'products' && (
           <div className="space-y-8">
@@ -690,7 +771,7 @@ export default function AdminDashboardPage() {
                 Tambah Produk Digital Baru
               </h2>
               <p className="text-xs text-[#64748B] mb-5">
-                Bisa unggah lebih dari 1 gambar sampul, lebih dari 1 file produk, dan/atau menggunakan Link Google Drive.
+                Dilengkapi fitur Harga Coret, multi-gambar sampul, multi-file, dan link Google Drive.
               </p>
 
               <form onSubmit={handleCreateProduct} className="space-y-4">
@@ -729,7 +810,7 @@ export default function AdminDashboardPage() {
 
                   <div>
                     <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                      Harga (Rupiah) *
+                      Harga Jual Saat Ini (Rp) *
                     </label>
                     <input
                       type="number"
@@ -737,23 +818,37 @@ export default function AdminDashboardPage() {
                       min="0"
                       value={prodPrice}
                       onChange={(e) => setProdPrice(e.target.value)}
-                      placeholder="Contoh: 49000"
+                      placeholder="Contoh: 35000"
                       className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-sm"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                      Label Badge (Opsional)
+                    <label className="block text-xs font-bold text-[#059669] mb-1">
+                      Harga Asli / Harga Coret (Opsional — Rp)
                     </label>
                     <input
-                      type="text"
-                      value={prodBadge}
-                      onChange={(e) => setProdBadge(e.target.value)}
-                      placeholder="Contoh: Terlaris / Baru"
-                      className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-sm"
+                      type="number"
+                      min="0"
+                      value={prodOriginalPrice}
+                      onChange={(e) => setProdOriginalPrice(e.target.value)}
+                      placeholder="Contoh: 99000 (Kosongkan jika tanpa harga coret)"
+                      className="w-full px-3.5 py-2.5 bg-[#ECFDF5]/40 border border-emerald-200 rounded-xl text-sm"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#0F172A] mb-1">
+                    Label Badge (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={prodBadge}
+                    onChange={(e) => setProdBadge(e.target.value)}
+                    placeholder="Contoh: Terlaris / Baru"
+                    className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-sm"
+                  />
                 </div>
 
                 <div>
@@ -770,7 +865,6 @@ export default function AdminDashboardPage() {
                   />
                 </div>
 
-                {/* Bagian Upload Banyak Thumbnail & Banyak File */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div className="p-4 rounded-xl bg-[#F8FAFC] border border-dashed border-slate-300 min-w-0">
                     <label className="block text-xs font-bold text-[#0F172A] mb-1">
@@ -804,7 +898,7 @@ export default function AdminDashboardPage() {
                       2A. Upload File Produk (Opsional — Bisa lebih dari 1 file)
                     </label>
                     <p className="text-[11px] text-[#64748B] mb-2">
-                      Pilih 1 atau beberapa file (.pdf, .xlsx, .pptx, .zip). Boleh dikosongkan jika memakai Link di bawah.
+                      Pilih 1 atau beberapa file (.pdf, .xlsx, .pptx, .zip).
                     </p>
                     <input
                       key={`digital-${fileInputKey}`}
@@ -826,12 +920,11 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
-                {/* Bagian Input Link Produk (Google Drive, Mega, Notion, dll.) */}
                 <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <label className="block text-xs font-bold text-[#0F172A]">
-                        2B. Link Produk Eksternal / Google Drive (Opsional — Bisa lebih dari 1 link)
+                        2B. Link Produk Eksternal / Google Drive (Opsional)
                       </label>
                       <p className="text-[11px] text-[#64748B]">
                         Masukkan link Google Drive, Mega, Canva, atau Notion jika produk berupa link.
@@ -864,7 +957,6 @@ export default function AdminDashboardPage() {
                           type="button"
                           onClick={() => handleRemoveLinkRow(idx)}
                           className="p-2 rounded-lg text-[#EF4444] hover:bg-red-50 shrink-0"
-                          title="Hapus baris link"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -893,7 +985,6 @@ export default function AdminDashboardPage() {
               </form>
             </div>
 
-            {/* Daftar Produk (Anti Melebar di HP dengan min-w-0 & break-all) */}
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200">
               <h3 className="text-base font-extrabold text-[#0F172A] mb-4">
                 Daftar Katalog Produk ({products.length})
@@ -936,9 +1027,17 @@ export default function AdminDashboardPage() {
                               )}
                             </div>
 
-                            <p className="text-xs font-extrabold text-[#10B981] mt-0.5">
-                              Rp{prod.price.toLocaleString('id-ID')}
-                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs font-extrabold text-[#10B981]">
+                                Rp{prod.price.toLocaleString('id-ID')}
+                              </span>
+                              {deliverables.original_price &&
+                                deliverables.original_price > prod.price && (
+                                  <span className="text-[11px] text-[#64748B] line-through">
+                                    Rp{deliverables.original_price.toLocaleString('id-ID')}
+                                  </span>
+                                )}
+                            </div>
 
                             <div className="text-[11px] text-[#64748B] mt-1 space-y-0.5 break-all">
                               {deliverables.files.length > 0 && (
@@ -980,7 +1079,6 @@ export default function AdminDashboardPage() {
                             type="button"
                             onClick={() => handleDeleteProduct(prod)}
                             className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-[#EF4444]"
-                            title="Hapus Produk"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -991,6 +1089,142 @@ export default function AdminDashboardPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* TAB BARU: PESAN PELANGGAN, KLAIM GARANSI, & LAYANAN KHUSUS */}
+        {/* ================================================================== */}
+        {activeTab === 'messages' && (
+          <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200">
+            <h2 className="text-lg font-extrabold text-[#0F172A] mb-1">
+              Kotak Masuk Pesan, Klaim Garansi & Layanan Kustom ({supportMessages.length})
+            </h2>
+            <p className="text-xs text-[#64748B] mb-5">
+              Seluruh pengaduan garansi dan pesanan jasa kustom dari Canvas di halaman toko masuk ke sini secara otomatis.
+            </p>
+
+            {supportMessages.length === 0 ? (
+              <p className="text-sm text-[#64748B] text-center py-12">
+                Belum ada pesan atau klaim garansi yang masuk.
+              </p>
+            ) : (
+              <div className="space-y-3.5">
+                {supportMessages.map((msg) => {
+                  const cleanWa = msg.sender_contact.replace(/[^0-9]/g, '');
+                  const waLink = cleanWa
+                    ? `https://wa.me/${
+                        cleanWa.startsWith('0')
+                          ? '62' + cleanWa.slice(1)
+                          : cleanWa
+                      }`
+                    : null;
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`p-4 rounded-xl border min-w-0 ${
+                        msg.status === 'BARU'
+                          ? 'bg-[#ECFDF5]/40 border-emerald-300'
+                          : 'bg-[#F8FAFC] border-slate-200/80'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+                              msg.type === 'KLAIM_GARANSI'
+                                ? 'bg-rose-100 text-rose-700'
+                                : msg.type === 'LAYANAN_KHUSUS'
+                                ? 'bg-[#ECFDF5] text-[#059669] border border-emerald-200'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {msg.type === 'KLAIM_GARANSI'
+                              ? '🛡️ Klaim Garansi'
+                              : msg.type === 'LAYANAN_KHUSUS'
+                              ? '✨ Pesan Jasa Kustom'
+                              : '💬 Pertanyaan'}
+                          </span>
+                          <span className="font-extrabold text-sm text-[#0F172A]">
+                            {msg.sender_name}
+                          </span>
+                          <span className="text-xs text-[#64748B]">
+                            • {new Date(msg.created_at).toLocaleString('id-ID')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMessageStatus(msg)}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
+                              msg.status === 'BARU'
+                                ? 'bg-[#10B981] text-white'
+                                : 'bg-white border border-slate-200 text-[#64748B]'
+                            }`}
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>
+                              {msg.status === 'BARU'
+                                ? 'Tandai Selesai'
+                                : 'Sudah Selesai'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSupportMessage(msg.id)}
+                            className="p-1.5 rounded-lg bg-red-50 text-[#EF4444] hover:bg-red-100"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-[#0F172A] space-y-1 mb-3 break-all">
+                        <p>
+                          <strong>Email:</strong> {msg.sender_email}
+                          {msg.sender_contact && (
+                            <span className="ml-3">
+                              <strong>WA/Kontak:</strong> {msg.sender_contact}
+                            </span>
+                          )}
+                          {msg.invoice_number && (
+                            <span className="ml-3">
+                              <strong>Invoice:</strong> #{msg.invoice_number}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-white border border-slate-200/80 text-xs sm:text-sm text-[#0F172A] whitespace-pre-line break-words mb-3">
+                        {msg.message}
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {waLink && (
+                          <a
+                            href={waLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-3 py-1.5 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-bold"
+                          >
+                            Balas via WhatsApp
+                          </a>
+                        )}
+                        <a
+                          href={`mailto:${msg.sender_email}?subject=Balasan%20Admin%20RizzFlow`}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-[#0F172A] text-xs font-bold"
+                        >
+                          Balas via Email
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
