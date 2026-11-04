@@ -21,20 +21,22 @@ import {
   ShieldCheck,
   QrCode,
   UserCheck,
-  Globe,
-  FileSpreadsheet,
-  Presentation,
+  Sparkles,
   Send,
   CheckCircle2,
   AlertCircle,
   Loader2,
   HelpCircle,
   MessageSquarePlus,
+  MailCheck,
+  MousePointerClick,
 } from 'lucide-react';
 import {
   supabase,
   parseThumbnails,
   parseProductDeliverables,
+  CustomServiceConfig,
+  DEFAULT_CUSTOM_SERVICE_CONFIG,
 } from '@/lib/supabase';
 import { Category, Product, CartItem, StoreSettings } from '@/types';
 
@@ -45,6 +47,8 @@ interface StorefrontClientProps {
 }
 
 const CART_STORAGE_KEY = 'rizzflow_cart_v1';
+const PRODUCTS_PER_SLIDE = 6; // Maksimal 6 produk per halaman/slide
+const VISIBLE_CATEGORY_LIMIT = 5; // Batas kategori sebelum dilipat ke tombol "Lainnya..."
 
 const OLD_DEFAULT_DESC =
   'Temukan template Excel, PPT, dan aset desain siap pakai untuk mempercepat produktivitasmu.';
@@ -54,19 +58,19 @@ const NEW_GENERAL_DESC =
 const FAQ_ITEMS = [
   {
     q: 'Bagaimana cara menerima file produk setelah saya membayar QRIS?',
-    a: 'Begitu kamu selesai memindai dan membayar kode QRIS, sistem otomatis RizzFlow akan langsung mendeteksi pembayaranmu dalam hitungan detik dan mengirimkan link unduhan produk langsung ke alamat email yang kamu isi saat Checkout.',
+    a: 'Begitu kamu selesai membayar kode QRIS, sistem otomatis RizzFlow langsung mendeteksi pembayaranmu dalam hitungan detik dan mengirimkan link unduhan produk ke alamat email yang kamu isi saat Checkout.',
   },
   {
-    q: 'Apakah saya harus mendaftar akun atau login terlebih dahulu untuk membeli?',
-    a: 'Tidak perlu! Di RizzFlow kamu bisa langsung belanja tanpa ribet membuat akun (Guest Checkout). Cukup pilih produk, masukkan email aktifmu, dan bayar via QRIS.',
+    q: 'Apakah saya harus daftar akun atau login terlebih dahulu?',
+    a: 'Tidak perlu! Kamu bisa langsung belanja tanpa buat akun (Guest Checkout). Cukup pilih produk, masukkan email aktifmu, dan bayar via QRIS.',
   },
   {
-    q: 'Bagaimana cara klaim garansi jika file belum masuk ke email atau ada kendala?',
-    a: 'Tenang, setiap pembelian di RizzFlow bergaransi 100%! Kamu cukup mengisi Canvas Pengaduan & Klaim Garansi yang tersedia di bagian bawah halaman ini dengan mencantumkan email atau nomor invoice-mu. Pesanmu akan langsung membunyikan notifikasi di perangkat Admin kami untuk segera dikirim ulang.',
+    q: 'Bagaimana cara klaim garansi jika file belum masuk ke email?',
+    a: 'Setiap pembelian bergaransi 100%! Cukup isi Canvas Klaim Garansi di samping/bawah ini dengan mencantumkan email atau nomor invoice-mu. Notifikasi akan langsung berbunyi di perangkat Admin kami.',
   },
   {
-    q: 'Apakah RizzFlow menerima jasa pembuatan Website sederhana atau Template Excel sesuai permintaan (Custom)?',
-    a: 'Ya! Selain menjual produk siap unduh di katalog, kami membuka Layanan Khusus pembuatan Website Sederhana (Landing Page, Web Profil/UMKM, Katalog), pembuatan Template Excel/Spreadsheet kustom (rumus otomatis, pembukuan, kasir), serta pembuatan Slide PPT/Dokumen. Silakan gunakan Canvas Pesan di bawah halaman ini dan pilih kategori "Pesan Layanan Khusus".',
+    q: 'Bagaimana cara memesan Layanan Kustom (Pembuatan Web / Template Excel / Lainnya)?',
+    a: 'Klik tombol "Pesan Layanan Kustom" di atas atau langsung pilih tab "Jasa Kustom" pada Canvas Pesan di bawah, lalu tuliskan kebutuhanmu. Admin kami akan segera menghubungi kamu.',
   },
 ];
 
@@ -77,15 +81,23 @@ export default function StorefrontClient({
 }: StorefrontClientProps) {
   const router = useRouter();
   const canvasFormRef = useRef<HTMLDivElement | null>(null);
+  const catalogTopRef = useRef<HTMLDivElement | null>(null);
 
-  // State data produk & kategori
+  // State data produk, kategori, pengaturan, & layanan kustom
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
+  const [customService, setCustomService] = useState<CustomServiceConfig>(
+    DEFAULT_CUSTOM_SERVICE_CONFIG
+  );
 
-  // State pencarian, kategori aktif, modal detail produk, galeri foto, keranjang, dan FAQ
+  // State pencarian, kategori, lipatan kategori, & nomor slide produk
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('ALL');
+  const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
+  const [currentSlide, setCurrentSlide] = useState<number>(1);
+
+  // State detail produk, keranjang, dan FAQ
   const [activeProduct, setActiveProduct] = useState<Product | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -113,7 +125,7 @@ export default function StorefrontClient({
       ? NEW_GENERAL_DESC
       : settings.banner_description;
 
-  // Segarkan data katalog langsung dari Supabase setiap kali halaman toko dibuka
+  // Segarkan data katalog & layanan kustom setiap kali halaman dibuka
   useEffect(() => {
     const refreshStorefrontData = async () => {
       const [prodRes, catRes, setRes] = await Promise.all([
@@ -129,20 +141,36 @@ export default function StorefrontClient({
       if (prodRes.data) setProducts(prodRes.data as Product[]);
       if (catRes.data) setCategories(catRes.data as Category[]);
       if (setRes.data) setSettings(setRes.data as StoreSettings);
+
+      try {
+        const cfgRes = await fetch('/api/messages?config=1');
+        if (cfgRes.ok) {
+          const cfgData = (await cfgRes.json()) as {
+            customServiceConfig?: CustomServiceConfig;
+          };
+          if (cfgData.customServiceConfig) {
+            setCustomService(cfgData.customServiceConfig);
+          }
+        }
+      } catch {
+        // Gunakan default jika gagal memuat
+      }
     };
 
     refreshStorefrontData();
   }, []);
 
-  // ==========================================================================
-  // PERBAIKAN POIN 8: TOMBOL KEMBALI (BACK BUTTON) BAWAAN HP & KUNCI SCROLL
-  // ==========================================================================
+  // Reset slide kembali ke halaman 1 setiap kali kata kunci pencarian atau kategori berubah
+  useEffect(() => {
+    setCurrentSlide(1);
+  }, [searchQuery, selectedCategoryId]);
+
+  // Penanganan Tombol Back Bawaan HP & Kunci Scroll Layar Belakang
   const isAnyOverlayOpen = Boolean(activeProduct || isCartOpen);
 
   useEffect(() => {
     if (isAnyOverlayOpen) {
       document.body.style.overflow = 'hidden';
-      // Tambahkan penanda riwayat agar tombol Back di HP menutup pop-up, bukan keluar dari web
       if (!window.history.state?.rizzflowOverlay) {
         window.history.pushState({ rizzflowOverlay: true }, '');
       }
@@ -157,7 +185,6 @@ export default function StorefrontClient({
 
   useEffect(() => {
     const handleHardwareBackButton = () => {
-      // Saat tombol Back di HP ditekan, tutup detail produk atau keranjang
       setActiveProduct(null);
       setIsCartOpen(false);
     };
@@ -238,14 +265,16 @@ export default function StorefrontClient({
     updateCartStorage(updated);
   };
 
-  // Fungsi mengarahkan pengunjung ke Canvas Form dengan pilihan Layanan Khusus otomatis terpilih
-  const scrollToCanvasWithService = (serviceName: string) => {
+  const handleJumpToCustomServiceCanvas = () => {
     setMsgType('LAYANAN_KHUSUS');
-    setMessageText(`Halo Admin RizzFlow, saya tertarik memesan ${serviceName}. Detail kebutuhan saya: `);
+    if (!messageText.trim()) {
+      setMessageText(
+        'Halo Admin RizzFlow, saya ingin memesan Layanan Kustom. Berikut detail kebutuhan saya: '
+      );
+    }
     canvasFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // Fungsi mengirim pesan dari Canvas ke Admin & Notifikasi HP
   const handleSendCanvasMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsgFeedback(null);
@@ -289,6 +318,7 @@ export default function StorefrontClient({
     }
   };
 
+  // Filter produk berdasarkan pencarian & kategori
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchesCategory =
@@ -302,6 +332,25 @@ export default function StorefrontClient({
       return matchesCategory && matchesSearch;
     });
   }, [products, selectedCategoryId, searchQuery]);
+
+  // Logika Slide Produk (Maksimal 6 Produk per Slide)
+  const totalSlides = Math.max(
+    1,
+    Math.ceil(filteredProducts.length / PRODUCTS_PER_SLIDE)
+  );
+  const paginatedProducts = useMemo(() => {
+    const startIdx = (currentSlide - 1) * PRODUCTS_PER_SLIDE;
+    return filteredProducts.slice(startIdx, startIdx + PRODUCTS_PER_SLIDE);
+  }, [filteredProducts, currentSlide]);
+
+  // Logika Lipatan Kategori ("Lainnya...")
+  const displayedCategories = showAllCategories
+    ? categories
+    : categories.slice(0, VISIBLE_CATEGORY_LIMIT);
+  const hiddenCategoryCount = Math.max(
+    0,
+    categories.length - VISIBLE_CATEGORY_LIMIT
+  );
 
   const totalCartItems = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalCartPrice = cart.reduce(
@@ -323,14 +372,14 @@ export default function StorefrontClient({
     <div className="min-h-screen bg-[#FFFFFF] text-[#0F172A] flex flex-col overflow-x-hidden">
       {/* Bilah Navigasi Atas */}
       <header className="sticky top-0 z-30 backdrop-blur-md bg-white/85 border-b border-slate-100">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="max-w-6xl mx-auto px-4 h-15 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
             <img
               src="/logo.jpg"
               alt={settings.store_name}
-              className="h-10 w-auto rounded-lg object-contain shadow-xs shrink-0"
+              className="h-9 w-auto rounded-lg object-contain shadow-xs shrink-0"
             />
-            <span className="font-bold text-lg tracking-tight text-[#0F172A] truncate">
+            <span className="font-bold text-base sm:text-lg tracking-tight text-[#0F172A] truncate">
               {settings.store_name}
             </span>
           </div>
@@ -341,22 +390,24 @@ export default function StorefrontClient({
               onClick={() =>
                 canvasFormRef.current?.scrollIntoView({ behavior: 'smooth' })
               }
-              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-[#059669] bg-[#ECFDF5] hover:bg-emerald-100 transition-colors"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-[#059669] bg-[#ECFDF5] hover:bg-emerald-100 transition-colors"
             >
-              <MessageSquarePlus className="w-4 h-4" />
-              <span>Klaim Garansi & Jasa Kustom</span>
+              <MessageSquarePlus className="w-3.5 h-3.5" />
+              <span>Bantuan & Jasa Kustom</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsCartOpen(true)}
-              className="relative inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#F8FAFC] hover:bg-[#ECFDF5] text-[#0F172A] border border-slate-200/80 transition-colors"
+              className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F8FAFC] hover:bg-[#ECFDF5] text-[#0F172A] border border-slate-200/80 transition-colors"
               aria-label="Buka Keranjang Belanja"
             >
-              <ShoppingBag className="w-5 h-5 text-[#10B981]" />
-              <span className="text-sm font-semibold hidden sm:inline">Keranjang</span>
+              <ShoppingBag className="w-4 h-4 text-[#10B981]" />
+              <span className="text-xs sm:text-sm font-semibold hidden sm:inline">
+                Keranjang
+              </span>
               {totalCartItems > 0 && (
-                <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-[#10B981] text-white">
+                <span className="px-1.5 py-0.5 text-[11px] font-bold rounded-full bg-[#10B981] text-white">
                   {totalCartItems}
                 </span>
               )}
@@ -365,392 +416,411 @@ export default function StorefrontClient({
         </div>
       </header>
 
-      {/* Konten Utama Katalog Toko */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 sm:py-10 space-y-10">
-        {/* Banner Sambutan (Tanpa Baris Teks Lama yang Dihapus) + 4 Kartu Trust Badges */}
-        <section className="space-y-4">
-          <div className="bg-gradient-to-br from-[#ECFDF5] via-[#F8FAFC] to-white border border-emerald-100 rounded-2xl p-6 sm:p-8">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] tracking-tight mb-2.5">
+      {/* Konten Utama Katalog Toko (Lebih Padat & Ringkas) */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-5 sm:py-8 space-y-6">
+        {/* Banner Sambutan + 4 Keunggulan Ringkas (Tanpa Sub-Teks) */}
+        <section className="space-y-3">
+          <div className="bg-gradient-to-br from-[#ECFDF5] via-[#F8FAFC] to-white border border-emerald-100 rounded-2xl p-5 sm:p-6">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-[#0F172A] tracking-tight mb-1.5">
               Semua Kebutuhan Produk Digitalmu di Satu Tempat
             </h1>
-            <p className="text-sm sm:text-base text-[#64748B] max-w-2xl leading-relaxed break-words">
+            <p className="text-xs sm:text-sm text-[#64748B] max-w-2xl leading-relaxed break-words">
               {bannerDescription}
             </p>
           </div>
 
-          {/* REKOMENDASI 1: Baris Jaminan Keunggulan (Trust Badges Strip) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80">
-              <div className="w-9 h-9 rounded-lg bg-[#ECFDF5] text-[#10B981] flex items-center justify-center shrink-0">
-                <Zap className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs sm:text-sm font-extrabold text-[#0F172A]">
-                  Pengiriman Instan
-                </div>
-                <div className="text-[11px] text-[#64748B] truncate">
-                  Otomatis masuk ke emailmu
-                </div>
-              </div>
+          {/* 4 Keunggulan Web Pendek & Ringkas */}
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
+              <Zap className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <span>Pengiriman Instan</span>
             </div>
-
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80">
-              <div className="w-9 h-9 rounded-lg bg-[#ECFDF5] text-[#10B981] flex items-center justify-center shrink-0">
-                <QrCode className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs sm:text-sm font-extrabold text-[#0F172A]">
-                  QRIS Resmi & Cepat
-                </div>
-                <div className="text-[11px] text-[#64748B] truncate">
-                  Semua M-Banking & E-Wallet
-                </div>
-              </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
+              <QrCode className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <span>QRIS Resmi</span>
             </div>
-
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80">
-              <div className="w-9 h-9 rounded-lg bg-[#ECFDF5] text-[#10B981] flex items-center justify-center shrink-0">
-                <UserCheck className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs sm:text-sm font-extrabold text-[#0F172A]">
-                  Tanpa Daftar Akun
-                </div>
-                <div className="text-[11px] text-[#64748B] truncate">
-                  Praktis langsung checkout
-                </div>
-              </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
+              <UserCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <span>Tanpa Daftar Akun</span>
             </div>
-
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80">
-              <div className="w-9 h-9 rounded-lg bg-[#ECFDF5] text-[#10B981] flex items-center justify-center shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs sm:text-sm font-extrabold text-[#0F172A]">
-                  Bergaransi 100%
-                </div>
-                <div className="text-[11px] text-[#64748B] truncate">
-                  Klaim mudah langsung di web
-                </div>
-              </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/80 text-xs font-bold text-[#0F172A]">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              <span>Bergaransi 100%</span>
             </div>
           </div>
         </section>
 
-        {/* Kolom Pencarian, Filter Kategori, & Grid Katalog Produk */}
-        <section className="space-y-5">
-          <div className="space-y-4">
+        {/* Pencarian, Kategori Berurut ke Bawah ("Lainnya..."), & Slide Produk (Maks 6) */}
+        <section ref={catalogTopRef} className="space-y-4">
+          <div className="space-y-2.5">
             <div className="relative">
-              <Search className="w-5 h-5 text-[#64748B] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="w-4 h-4 text-[#64748B] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari e-book, template, atau produk digital lainnya..."
-                className="w-full pl-11 pr-10 py-3.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-sm text-[#0F172A] placeholder:text-[#64748B] focus:outline-none focus:border-[#10B981] focus:bg-white transition-all"
+                placeholder="Cari e-book, template, atau produk digital..."
+                className="w-full pl-10 pr-9 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm text-[#0F172A] placeholder:text-[#64748B] focus:outline-none focus:border-[#10B981] focus:bg-white transition-all"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
                 >
                   <X className="w-4 h-4" />
                 </button>
               )}
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {/* Daftar Kategori Kecil Berurut ke Bawah + Tombol "Lainnya..." */}
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setSelectedCategoryId('ALL')}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   selectedCategoryId === 'ALL'
-                    ? 'bg-[#10B981] text-white shadow-sm shadow-emerald-500/20'
+                    ? 'bg-[#10B981] text-white shadow-xs'
                     : 'bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] border border-slate-200/80'
                 }`}
               >
-                Semua Produk
+                Semua ({products.length})
               </button>
-              {categories.map((cat) => (
+
+              {displayedCategories.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectedCategoryId(cat.id)}
-                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                     selectedCategoryId === cat.id
-                      ? 'bg-[#10B981] text-white shadow-sm shadow-emerald-500/20'
+                      ? 'bg-[#10B981] text-white shadow-xs'
                       : 'bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] border border-slate-200/80'
                   }`}
                 >
                   {cat.name}
                 </button>
               ))}
+
+              {hiddenCategoryCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllCategories((prev) => !prev)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-extrabold text-[#059669] bg-[#ECFDF5] hover:bg-emerald-100 border border-emerald-200 transition-colors"
+                >
+                  {showAllCategories
+                    ? 'Sembunyikan'
+                    : `Lainnya... (+${hiddenCategoryCount})`}
+                </button>
+              )}
             </div>
           </div>
 
+          {/* Grid Katalog Produk (Maksimal 6 Produk per Slide) */}
           {filteredProducts.length === 0 ? (
-            <div className="text-center py-16 bg-[#F8FAFC] rounded-2xl border border-dashed border-slate-200 px-4">
-              <FileText className="w-10 h-10 text-[#64748B] mx-auto mb-3 stroke-[1.5]" />
-              <p className="font-semibold text-[#0F172A] mb-1">Produk tidak ditemukan</p>
-              <p className="text-sm text-[#64748B]">
-                Coba gunakan kata kunci pencarian lain atau pilih kategori Semua Produk.
+            <div className="text-center py-12 bg-[#F8FAFC] rounded-2xl border border-dashed border-slate-200 px-4">
+              <FileText className="w-9 h-9 text-[#64748B] mx-auto mb-2 stroke-[1.5]" />
+              <p className="font-semibold text-sm text-[#0F172A] mb-0.5">
+                Produk tidak ditemukan
+              </p>
+              <p className="text-xs text-[#64748B]">
+                Coba kata kunci lain atau pilih kategori Semua.
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-5">
-              {filteredProducts.map((product) => {
-                const isAdded = addedProductId === product.id;
-                const thumbList = parseThumbnails(product.thumbnail_url);
-                const coverThumb = thumbList[0] || '';
-                const deliverables = parseProductDeliverables(product.file_path);
-                const origPrice = deliverables.original_price;
-                const hasDiscount =
-                  typeof origPrice === 'number' && origPrice > product.price;
-                const savePercent = hasDiscount
-                  ? Math.round(((origPrice - product.price) / origPrice) * 100)
-                  : 0;
+            <div className="space-y-4">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`slide-${currentSlide}-${selectedCategoryId}-${searchQuery}`}
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -16 }}
+                  transition={{ duration: 0.2 }}
+                  className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4"
+                >
+                  {paginatedProducts.map((product) => {
+                    const isAdded = addedProductId === product.id;
+                    const thumbList = parseThumbnails(product.thumbnail_url);
+                    const coverThumb = thumbList[0] || '';
+                    const deliverables = parseProductDeliverables(product.file_path);
+                    const origPrice = deliverables.original_price;
+                    const hasDiscount =
+                      typeof origPrice === 'number' && origPrice > product.price;
+                    const savePercent = hasDiscount
+                      ? Math.round(((origPrice - product.price) / origPrice) * 100)
+                      : 0;
 
-                return (
-                  <motion.div
-                    key={product.id}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    whileTap={{ scale: 0.99 }}
-                    className="group bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-emerald-200 transition-all flex flex-col min-w-0"
-                  >
-                    <div
-                      onClick={() => {
-                        setActiveProduct(product);
-                        setActiveImageIndex(0);
-                      }}
-                      className="cursor-pointer flex-1 flex flex-col min-w-0"
-                    >
-                      <div className="relative aspect-[4/3] bg-[#F8FAFC] overflow-hidden border-b border-slate-100">
-                        <img
-                          src={coverThumb}
-                          alt={product.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        {product.badge && (
-                          <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 shadow-sm">
-                            {product.badge}
-                          </span>
-                        )}
-                        {hasDiscount && savePercent > 0 && (
-                          <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-500 text-white shadow-xs">
-                            -{savePercent}%
-                          </span>
-                        )}
-                        {thumbList.length > 1 && (
-                          <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-900/70 text-white inline-flex items-center gap-1">
-                            <Images className="w-3 h-3" />
-                            <span>{thumbList.length} Foto</span>
-                          </span>
-                        )}
-                      </div>
+                    return (
+                      <div
+                        key={product.id}
+                        className="group bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-xs hover:shadow-md hover:border-emerald-200 transition-all flex flex-col min-w-0"
+                      >
+                        <div
+                          onClick={() => {
+                            setActiveProduct(product);
+                            setActiveImageIndex(0);
+                          }}
+                          className="cursor-pointer flex-1 flex flex-col min-w-0"
+                        >
+                          <div className="relative aspect-[4/3] bg-[#F8FAFC] overflow-hidden border-b border-slate-100">
+                            <img
+                              src={coverThumb}
+                              alt={product.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                            {product.badge && (
+                              <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 shadow-xs">
+                                {product.badge}
+                              </span>
+                            )}
+                            {hasDiscount && savePercent > 0 && (
+                              <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-500 text-white">
+                                -{savePercent}%
+                              </span>
+                            )}
+                            {thumbList.length > 1 && (
+                              <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-900/70 text-white inline-flex items-center gap-1">
+                                <Images className="w-3 h-3" />
+                                <span>{thumbList.length}</span>
+                              </span>
+                            )}
+                          </div>
 
-                      <div className="p-3.5 sm:p-4 flex-1 flex flex-col min-w-0">
-                        <h2 className="font-bold text-sm sm:text-base text-[#0F172A] line-clamp-2 break-words mb-1 group-hover:text-[#059669] transition-colors">
-                          {product.title}
-                        </h2>
-                        <p className="text-xs text-[#64748B] line-clamp-2 break-words mb-3 flex-1">
-                          {product.description}
-                        </p>
+                          <div className="p-3 sm:p-3.5 flex-1 flex flex-col min-w-0">
+                            <h2 className="font-bold text-xs sm:text-sm text-[#0F172A] line-clamp-2 break-words mb-1 group-hover:text-[#059669] transition-colors">
+                              {product.title}
+                            </h2>
+                            <p className="text-[11px] text-[#64748B] line-clamp-1 break-words mb-2 flex-1">
+                              {product.description}
+                            </p>
 
-                        {/* REKOMENDASI 2: Tampilan Harga Coret (Harga Asli vs Harga Promo) */}
-                        <div className="space-y-0.5">
-                          {hasDiscount && (
-                            <div className="text-[11px] text-[#64748B] line-through">
-                              Rp{origPrice.toLocaleString('id-ID')}
+                            <div className="flex items-baseline gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-xs sm:text-sm text-[#10B981]">
+                                Rp{product.price.toLocaleString('id-ID')}
+                              </span>
+                              {hasDiscount && (
+                                <span className="text-[10px] text-[#64748B] line-through">
+                                  Rp{origPrice.toLocaleString('id-ID')}
+                                </span>
+                              )}
                             </div>
-                          )}
-                          <div className="font-extrabold text-sm sm:text-base text-[#10B981]">
-                            Rp{product.price.toLocaleString('id-ID')}
                           </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="px-3.5 pb-3.5 sm:px-4 sm:pb-4">
-                      <button
-                        type="button"
-                        onClick={() => handleAddToCart(product)}
-                        className={`w-full py-2.5 px-3 rounded-xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all ${
-                          isAdded
-                            ? 'bg-[#059669] text-white'
-                            : 'bg-[#10B981] hover:bg-[#059669] text-white shadow-sm shadow-emerald-500/15'
-                        }`}
-                      >
-                        {isAdded ? (
-                          <>
-                            <Check className="w-4 h-4" />
-                            <span>Ditambahkan</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="w-4 h-4" />
-                            <span>Keranjang</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
+                        <div className="px-3 pb-3 sm:px-3.5 sm:pb-3.5">
+                          <button
+                            type="button"
+                            onClick={() => handleAddToCart(product)}
+                            className={`w-full py-2 px-2.5 rounded-lg font-semibold text-xs flex items-center justify-center gap-1 transition-all ${
+                              isAdded
+                                ? 'bg-[#059669] text-white'
+                                : 'bg-[#10B981] hover:bg-[#059669] text-white'
+                            }`}
+                          >
+                            {isAdded ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Ditambahkan</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Keranjang</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </motion.div>
+              </AnimatePresence>
+
+              {/* Navigasi Slide Halaman Produk (Muncul Jika Produk Lebih dari 6) */}
+              {totalSlides > 1 && (
+                <div className="flex items-center justify-between gap-2 pt-1 bg-[#F8FAFC] px-3.5 py-2.5 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    disabled={currentSlide === 1}
+                    onClick={() => {
+                      setCurrentSlide((p) => Math.max(1, p - 1));
+                      catalogTopRef.current?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40 hover:border-[#10B981] transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Sebelumnya</span>
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-extrabold text-[#0F172A]">
+                      Slide {currentSlide} / {totalSlides}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={currentSlide === totalSlides}
+                    onClick={() => {
+                      setCurrentSlide((p) => Math.min(totalSlides, p + 1));
+                      catalogTopRef.current?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0F172A] disabled:opacity-40 hover:border-[#10B981] transition-colors"
+                  >
+                    <span>Selanjutnya</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </section>
 
         {/* ================================================================== */}
-        {/* POIN 6: SEKSI LAYANAN KHUSUS / CUSTOM ORDER (WEB, EXCEL, PPT/TOOLS) */}
+        {/* LAYANAN KUSTOM RINGKAS (1 KARTU + 1 TOMBOL + DIATUR DARI ADMIN) */}
         {/* ================================================================== */}
-        <section className="bg-gradient-to-br from-[#F8FAFC] to-[#ECFDF5]/50 border border-emerald-200/80 rounded-2xl p-6 sm:p-8">
-          <div className="max-w-2xl mb-6">
-            <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 mb-2">
-              ✨ Layanan Kustom RizzFlow
-            </span>
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#0F172A] mb-2">
-              Butuh Website Sederhana atau Template Sesuai Permintaanmu?
-            </h2>
-            <p className="text-xs sm:text-sm text-[#64748B] leading-relaxed">
-              Selain produk siap unduh di atas, kami juga menerima pembuatan sistem dan dokumen digital kustom yang dirancang khusus mengikuti kebutuhan tugas, bisnis, atau usahamu.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#10B981] flex items-center justify-center mb-3">
-                  <Globe className="w-5 h-5" />
-                </div>
-                <h3 className="font-extrabold text-base text-[#0F172A] mb-1.5">
-                  Pembuatan Web Sederhana
-                </h3>
-                <p className="text-xs text-[#64748B] leading-relaxed mb-4">
-                  Pembuatan Landing Page promosi, website profil UMKM, halaman portofolio, atau mini-web katalog yang responsif di HP.
-                </p>
+        <section className="bg-gradient-to-r from-[#ECFDF5] via-[#F8FAFC] to-white border border-emerald-200/80 rounded-2xl p-4 sm:p-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-2 min-w-0 flex-1">
+              <div className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#059669]">
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span>Layanan Kustom RizzFlow</span>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  scrollToCanvasWithService('Jasa Pembuatan Website Sederhana / Landing Page')
-                }
-                className="w-full py-2.5 px-3 rounded-xl bg-[#F8FAFC] hover:bg-[#10B981] text-[#059669] hover:text-white border border-emerald-200 font-bold text-xs transition-colors"
-              >
-                Request Pembuatan Web →
-              </button>
+              <h2 className="text-base sm:text-lg font-extrabold text-[#0F172A] break-words">
+                {customService.title}
+              </h2>
+              <p className="text-xs text-[#64748B] leading-relaxed break-words">
+                {customService.description}
+              </p>
+
+              {/* Daftar Layanan Tersedia dalam Bentuk Chip Ringkas */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {customService.services.map((srv, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-emerald-200 text-[11px] font-bold text-[#0F172A]"
+                  >
+                    <Check className="w-3 h-3 text-[#10B981] shrink-0" />
+                    <span>{srv}</span>
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#10B981] flex items-center justify-center mb-3">
-                  <FileSpreadsheet className="w-5 h-5" />
-                </div>
-                <h3 className="font-extrabold text-base text-[#0F172A] mb-1.5">
-                  Template Excel Kustom
-                </h3>
-                <p className="text-xs text-[#64748B] leading-relaxed mb-4">
-                  Pembuatan tabel pembukuan otomatis, laporan kasir, hitung HPP, stok barang, hingga rumus Excel/Spreadsheet sesuai permintaanmu.
-                </p>
-              </div>
+            <div className="shrink-0">
               <button
                 type="button"
-                onClick={() =>
-                  scrollToCanvasWithService('Jasa Pembuatan Template Excel Kustom')
-                }
-                className="w-full py-2.5 px-3 rounded-xl bg-[#F8FAFC] hover:bg-[#10B981] text-[#059669] hover:text-white border border-emerald-200 font-bold text-xs transition-colors"
+                onClick={handleJumpToCustomServiceCanvas}
+                className="w-full md:w-auto px-5 py-3 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm shadow-emerald-500/20 transition-all"
               >
-                Request Template Excel →
-              </button>
-            </div>
-
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#10B981] flex items-center justify-center mb-3">
-                  <Presentation className="w-5 h-5" />
-                </div>
-                <h3 className="font-extrabold text-base text-[#0F172A] mb-1.5">
-                  Slide PPT, Dokumen & Tools AI
-                </h3>
-                <p className="text-xs text-[#64748B] leading-relaxed mb-4">
-                  Pembuatan slide presentasi profesional, template workspace Notion, kalkulator web interaktif, atau dokumen siap pakai lainnya.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  scrollToCanvasWithService('Jasa Slide PPT / Dokumen / Tools Digital Kustom')
-                }
-                className="w-full py-2.5 px-3 rounded-xl bg-[#F8FAFC] hover:bg-[#10B981] text-[#059669] hover:text-white border border-emerald-200 font-bold text-xs transition-colors"
-              >
-                Request Layanan Ini →
+                <span>Pesan Layanan Kustom</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         </section>
 
         {/* ================================================================== */}
-        {/* REKOMENDASI 3A: CARA PEMBELIAN DALAM 3 LANGKAH MUDAH */}
+        {/* CARA BELANJA KREATIF, BERANIMASI, HIDUP & RINGKAS */}
         {/* ================================================================== */}
-        <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
-          <h2 className="text-lg sm:text-xl font-extrabold text-[#0F172A] text-center mb-6">
-            Cara Belanja Mudah dalam 3 Langkah
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-100 text-center">
-              <div className="w-8 h-8 rounded-full bg-[#10B981] text-white font-extrabold text-sm flex items-center justify-center mx-auto mb-2.5">
-                1
-              </div>
-              <h3 className="font-bold text-sm text-[#0F172A] mb-1">
-                Pilih Produk Digital
-              </h3>
-              <p className="text-xs text-[#64748B]">
-                Masukkan produk pilihanmu ke keranjang dan klik tombol Lanjut ke Checkout.
-              </p>
+        <section className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 overflow-hidden relative">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+            <div className="sm:max-w-[200px] shrink-0">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">
+                ⚡ Otomatis 24/7
+              </span>
+              <h2 className="text-sm sm:text-base font-extrabold text-white mt-0.5">
+                3 Langkah Instan Belanja di RizzFlow
+              </h2>
             </div>
 
-            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-100 text-center">
-              <div className="w-8 h-8 rounded-full bg-[#10B981] text-white font-extrabold text-sm flex items-center justify-center mx-auto mb-2.5">
-                2
+            <div className="flex-1 grid grid-cols-3 gap-2 sm:gap-3 relative">
+              {/* Garis Animasi Penghubung di Belakang */}
+              <div className="hidden sm:block absolute top-5 left-12 right-12 h-0.5 bg-slate-700 overflow-hidden">
+                <motion.div
+                  animate={{ x: ['-100%', '100%'] }}
+                  transition={{ repeat: Infinity, duration: 2.8, ease: 'linear' }}
+                  className="w-1/2 h-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
+                />
               </div>
-              <h3 className="font-bold text-sm text-[#0F172A] mb-1">
-                Isi Email & Bayar QRIS
-              </h3>
-              <p className="text-xs text-[#64748B]">
-                Masukkan email aktifmu (tanpa perlu buat akun) lalu pindai kode QRIS yang muncul.
-              </p>
-            </div>
 
-            <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-100 text-center">
-              <div className="w-8 h-8 rounded-full bg-[#10B981] text-white font-extrabold text-sm flex items-center justify-center mx-auto mb-2.5">
-                3
-              </div>
-              <h3 className="font-bold text-sm text-[#0F172A] mb-1">
-                File Langsung Terkirim
-              </h3>
-              <p className="text-xs text-[#64748B]">
-                Detik itu juga setelah lunas, link unduhan produk otomatis masuk ke kotak masuk emailmu!
-              </p>
+              {/* Langkah 1 */}
+              <motion.div
+                whileHover={{ y: -2 }}
+                className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
+              >
+                <motion.div
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ repeat: Infinity, duration: 2.2 }}
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                >
+                  <MousePointerClick className="w-4 h-4" />
+                </motion.div>
+                <span className="text-[11px] sm:text-xs font-extrabold text-white">
+                  1. Pilih Produk
+                </span>
+                <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
+                  Masukkan keranjang
+                </span>
+              </motion.div>
+
+              {/* Langkah 2 */}
+              <motion.div
+                whileHover={{ y: -2 }}
+                className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
+              >
+                <motion.div
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ repeat: Infinity, duration: 2.2, delay: 0.6 }}
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                >
+                  <QrCode className="w-4 h-4" />
+                </motion.div>
+                <span className="text-[11px] sm:text-xs font-extrabold text-white">
+                  2. Scan QRIS
+                </span>
+                <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
+                  Isi email & bayar
+                </span>
+              </motion.div>
+
+              {/* Langkah 3 */}
+              <motion.div
+                whileHover={{ y: -2 }}
+                className="relative z-10 bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 sm:p-3 flex flex-col items-center text-center"
+              >
+                <motion.div
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ repeat: Infinity, duration: 2.2, delay: 1.2 }}
+                  className="w-8 h-8 rounded-full bg-[#10B981] text-white flex items-center justify-center mb-1.5 shadow-md shadow-emerald-500/30"
+                >
+                  <MailCheck className="w-4 h-4" />
+                </motion.div>
+                <span className="text-[11px] sm:text-xs font-extrabold text-white">
+                  3. Cek Emailmu!
+                </span>
+                <span className="text-[10px] text-slate-300 hidden sm:inline mt-0.5">
+                  File langsung masuk
+                </span>
+              </motion.div>
             </div>
           </div>
         </section>
 
         {/* ================================================================== */}
-        {/* REKOMENDASI 3B: TANYA JAWAB (FAQ) & CANVAS KLAIM GARANSI / PESAN */}
+        {/* TANYA JAWAB (FAQ) & CANVAS KLAIM GARANSI / PESAN KHUSUS */}
         {/* ================================================================== */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           {/* Kolom Kiri: Tanya Jawab (FAQ) */}
-          <div className="lg:col-span-6 bg-white border border-slate-200 rounded-2xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <HelpCircle className="w-5 h-5 text-[#10B981]" />
-              <h2 className="text-lg font-extrabold text-[#0F172A]">
+          <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-3.5">
+              <HelpCircle className="w-4 h-4 text-[#10B981]" />
+              <h2 className="text-base font-extrabold text-[#0F172A]">
                 Tanya Jawab (FAQ)
               </h2>
             </div>
 
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {FAQ_ITEMS.map((item, idx) => {
                 const isOpen = openFaqIndex === idx;
                 return (
@@ -761,7 +831,7 @@ export default function StorefrontClient({
                     <button
                       type="button"
                       onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
-                      className="w-full p-4 text-left flex items-center justify-between gap-3 font-bold text-xs sm:text-sm text-[#0F172A]"
+                      className="w-full p-3.5 text-left flex items-center justify-between gap-2 font-bold text-xs text-[#0F172A]"
                     >
                       <span>{item.q}</span>
                       <ChevronDown
@@ -771,7 +841,7 @@ export default function StorefrontClient({
                       />
                     </button>
                     {isOpen && (
-                      <div className="px-4 pb-4 text-xs text-[#64748B] leading-relaxed border-t border-slate-100 pt-3 bg-white">
+                      <div className="px-3.5 pb-3.5 text-xs text-[#64748B] leading-relaxed border-t border-slate-100 pt-2.5 bg-white">
                         {item.a}
                       </div>
                     )}
@@ -781,28 +851,27 @@ export default function StorefrontClient({
             </div>
           </div>
 
-          {/* Kolom Kanan: Canvas Formulir Klaim Garansi & Request Layanan Khusus */}
+          {/* Kolom Kanan: Canvas Formulir Klaim Garansi & Request Layanan Kustom */}
           <div
             ref={canvasFormRef}
-            className="lg:col-span-6 bg-white border border-emerald-200 rounded-2xl p-6 shadow-xs"
+            className="lg:col-span-7 bg-white border border-emerald-200 rounded-2xl p-5 shadow-xs"
           >
             <div className="flex items-center gap-2 mb-1">
-              <MessageSquarePlus className="w-5 h-5 text-[#10B981]" />
-              <h2 className="text-lg font-extrabold text-[#0F172A]">
-                Canvas Klaim Garansi & Pesan Khusus
+              <MessageSquarePlus className="w-4 h-4 text-[#10B981]" />
+              <h2 className="text-base font-extrabold text-[#0F172A]">
+                Canvas Klaim Garansi & Pesan Layanan Kustom
               </h2>
             </div>
-            <p className="text-xs text-[#64748B] mb-5">
-              Produk belum masuk ke email atau ingin memesan pembuatan Web/Excel kustom? Tulis pesanmu di bawah ini — langsung terkirim ke Admin kami!
+            <p className="text-xs text-[#64748B] mb-4">
+              Ada kendala pengiriman file atau ingin pesan jasa pembuatan kustom? Kirim pesan di bawah ini.
             </p>
 
-            <form onSubmit={handleSendCanvasMessage} className="space-y-3.5">
-              {/* Pilihan Tujuan Pesan */}
+            <form onSubmit={handleSendCanvasMessage} className="space-y-3">
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setMsgType('KLAIM_GARANSI')}
-                  className={`py-2 px-2 rounded-xl text-[11px] sm:text-xs font-bold border transition-all ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all ${
                     msgType === 'KLAIM_GARANSI'
                       ? 'bg-[#10B981] text-white border-[#10B981]'
                       : 'bg-[#F8FAFC] text-[#64748B] border-slate-200'
@@ -813,7 +882,7 @@ export default function StorefrontClient({
                 <button
                   type="button"
                   onClick={() => setMsgType('LAYANAN_KHUSUS')}
-                  className={`py-2 px-2 rounded-xl text-[11px] sm:text-xs font-bold border transition-all ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all ${
                     msgType === 'LAYANAN_KHUSUS'
                       ? 'bg-[#10B981] text-white border-[#10B981]'
                       : 'bg-[#F8FAFC] text-[#64748B] border-slate-200'
@@ -824,7 +893,7 @@ export default function StorefrontClient({
                 <button
                   type="button"
                   onClick={() => setMsgType('PERTANYAAN')}
-                  className={`py-2 px-2 rounded-xl text-[11px] sm:text-xs font-bold border transition-all ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all ${
                     msgType === 'PERTANYAAN'
                       ? 'bg-[#10B981] text-white border-[#10B981]'
                       : 'bg-[#F8FAFC] text-[#64748B] border-slate-200'
@@ -834,85 +903,58 @@ export default function StorefrontClient({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                    Nama Kamu *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={senderName}
-                    onChange={(e) => setSenderName(e.target.value)}
-                    placeholder="Contoh: Budi"
-                    className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                    Email Kamu *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={senderEmail}
-                    onChange={(e) => setSenderEmail(e.target.value)}
-                    placeholder="email@gmail.com"
-                    className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                    No. WhatsApp (Agar Cepat Dibalas)
-                  </label>
-                  <input
-                    type="text"
-                    value={senderContact}
-                    onChange={(e) => setSenderContact(e.target.value)}
-                    placeholder="Contoh: 0812xxxx"
-                    className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                    Nomor Invoice (Jika Klaim Produk)
-                  </label>
-                  <input
-                    type="text"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="Contoh: INV-2026xxxx"
-                    className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#0F172A] mb-1">
-                  Tulis Pesan / Detail Klaim / Permintaan Kustom *
-                </label>
-                <textarea
-                  rows={4}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <input
+                  type="text"
                   required
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder={
-                    msgType === 'KLAIM_GARANSI'
-                      ? 'Tuliskan kendalamu (misal: Saya sudah bayar QRIS untuk produk X tapi email belum masuk)...'
-                      : 'Jelaskan website sederhana atau template Excel seperti apa yang ingin kamu pesan...'
-                  }
-                  className="w-full px-3.5 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs sm:text-sm"
+                  value={senderName}
+                  onChange={(e) => setSenderName(e.target.value)}
+                  placeholder="Nama Kamu *"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
+                />
+                <input
+                  type="email"
+                  required
+                  value={senderEmail}
+                  onChange={(e) => setSenderEmail(e.target.value)}
+                  placeholder="Email Aktif Kamu *"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
                 />
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <input
+                  type="text"
+                  value={senderContact}
+                  onChange={(e) => setSenderContact(e.target.value)}
+                  placeholder="No. WhatsApp (Opsional)"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
+                />
+                <input
+                  type="text"
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  placeholder="No. Invoice (Jika Klaim Garansi)"
+                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
+                />
+              </div>
+
+              <textarea
+                rows={3}
+                required
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                placeholder={
+                  msgType === 'KLAIM_GARANSI'
+                    ? 'Jelaskan kendalamu (misal: Pembayaran QRIS sukses tapi file belum masuk)...'
+                    : 'Tuliskan detail website sederhana / template Excel kustom yang ingin kamu buat...'
+                }
+                className="w-full px-3 py-2 bg-[#F8FAFC] border border-slate-200 rounded-xl text-xs"
+              />
+
               {msgFeedback && (
                 <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                  className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
                     msgFeedback.type === 'success'
                       ? 'bg-[#ECFDF5] text-[#059669] border border-emerald-200'
                       : 'bg-red-50 text-[#EF4444] border border-red-200'
@@ -930,17 +972,17 @@ export default function StorefrontClient({
               <button
                 type="submit"
                 disabled={isSendingMsg}
-                className="w-full py-3.5 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors shadow-sm"
+                className="w-full py-3 px-4 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:bg-emerald-300 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs"
               >
                 {isSendingMsg ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Mengirim ke Admin...</span>
+                    <span>Mengirim...</span>
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    <span>Kirim Pesan Sekarang</span>
+                    <span>Kirim Pesan ke Admin</span>
                   </>
                 )}
               </button>
@@ -976,7 +1018,7 @@ export default function StorefrontClient({
         )}
       </AnimatePresence>
 
-      {/* Modal Detail Produk (Tinggi 2/3 Layar, Gambar Ikut Ter-scroll, Mendukung Tombol Back HP) */}
+      {/* Modal Detail Produk (Tinggi 2/3 Layar, Gambar Ikut Ter-scroll, Tombol Back HP Aktif) */}
       <AnimatePresence>
         {activeProduct && (
           <motion.div
@@ -1113,7 +1155,7 @@ export default function StorefrontClient({
         )}
       </AnimatePresence>
 
-      {/* Slide-Over Keranjang Belanja (Mendukung Tombol Back HP) */}
+      {/* Slide-Over Keranjang Belanja */}
       <AnimatePresence>
         {isCartOpen && (
           <motion.div
@@ -1245,7 +1287,7 @@ export default function StorefrontClient({
       </AnimatePresence>
 
       {/* Footer dengan Link "laporkan" */}
-      <footer className="border-t border-slate-100 py-6 text-xs text-[#64748B] bg-[#F8FAFC] mt-12">
+      <footer className="border-t border-slate-100 py-5 text-xs text-[#64748B] bg-[#F8FAFC] mt-8">
         <div className="max-w-6xl mx-auto px-4 flex flex-row items-center justify-between gap-2">
           <span>
             © {new Date().getFullYear()} {settings.store_name}. Seluruh hak cipta dilindungi.

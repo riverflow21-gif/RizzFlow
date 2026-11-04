@@ -153,7 +153,7 @@ export async function buildProductDeliveryItems(params: {
 }
 
 // ============================================================================
-// PENYIMPANAN PESAN KLAIM GARANSI & PESANAN LAYANAN KHUSUS (TANPA UBAH SQL)
+// PENYIMPANAN PESAN PELANGGAN & KONFIGURASI LAYANAN KUSTOM (TANPA UBAH SQL)
 // ============================================================================
 
 export interface CustomerSupportMessage {
@@ -161,14 +161,33 @@ export interface CustomerSupportMessage {
   type: 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
   sender_name: string;
   sender_email: string;
-  sender_contact: string; // No WA / Telegram pembeli (opsional)
+  sender_contact: string;
   invoice_number: string;
   message: string;
   status: 'BARU' | 'SELESAI';
   created_at: string;
 }
 
+export interface CustomServiceConfig {
+  title: string;
+  description: string;
+  services: string[];
+}
+
+export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
+  title: 'Layanan Pembuatan Digital Kustom Sesuai Permintaan',
+  description:
+    'Butuh pembuatan web sederhana, rumus template Excel khusus, atau slide presentasi kustom? Tim RizzFlow siap mengerjakannya sesuai kebutuhanmu.',
+  services: [
+    'Pembuatan Website Sederhana & Landing Page',
+    'Template Excel & Spreadsheet Kustom',
+    'Slide Presentasi PPT & Dokumen',
+    'Sistem Workspace Notion & Tools AI',
+  ],
+};
+
 const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
+const CUSTOM_SERVICES_STORAGE_FILE = '__rizzflow_custom_services.json';
 
 export async function getStoredCustomerMessages(): Promise<CustomerSupportMessage[]> {
   const supabaseAdmin = getSupabaseAdmin();
@@ -198,6 +217,46 @@ export async function saveStoredCustomerMessages(
   await supabaseAdmin.storage
     .from('digital-products')
     .upload(MESSAGES_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
+      contentType: 'application/json',
+      upsert: true,
+    });
+}
+
+export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfig> {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin.storage
+      .from('digital-products')
+      .download(CUSTOM_SERVICES_STORAGE_FILE);
+
+    if (error || !data) {
+      return DEFAULT_CUSTOM_SERVICE_CONFIG;
+    }
+
+    const text = await data.text();
+    const parsed = JSON.parse(text) as Partial<CustomServiceConfig>;
+    return {
+      title: parsed.title || DEFAULT_CUSTOM_SERVICE_CONFIG.title,
+      description: parsed.description || DEFAULT_CUSTOM_SERVICE_CONFIG.description,
+      services:
+        Array.isArray(parsed.services) && parsed.services.length > 0
+          ? parsed.services
+          : DEFAULT_CUSTOM_SERVICE_CONFIG.services,
+    };
+  } catch {
+    return DEFAULT_CUSTOM_SERVICE_CONFIG;
+  }
+}
+
+export async function saveStoredCustomServiceConfig(
+  config: CustomServiceConfig
+): Promise<void> {
+  const supabaseAdmin = getSupabaseAdmin();
+  const payload = JSON.stringify(config, null, 2);
+
+  await supabaseAdmin.storage
+    .from('digital-products')
+    .upload(CUSTOM_SERVICES_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
       contentType: 'application/json',
       upsert: true,
     });

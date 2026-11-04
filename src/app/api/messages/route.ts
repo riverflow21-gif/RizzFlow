@@ -5,7 +5,10 @@ import {
   getSupabaseAdmin,
   getStoredCustomerMessages,
   saveStoredCustomerMessages,
+  getStoredCustomServiceConfig,
+  saveStoredCustomServiceConfig,
   CustomerSupportMessage,
+  CustomServiceConfig,
 } from '@/lib/supabase';
 
 interface CreateMessageBody {
@@ -27,10 +30,6 @@ async function verifyAdminAuth(request: Request): Promise<boolean> {
   return !error && Boolean(data?.user);
 }
 
-/**
- * Mengirim notifikasi instan ke HP pemilik toko melalui Bot Telegram (jika diatur)
- * dan melalui Email Admin.
- */
 async function notifyOwnerPhone(msg: CustomerSupportMessage) {
   const typeLabel =
     msg.type === 'KLAIM_GARANSI'
@@ -39,7 +38,6 @@ async function notifyOwnerPhone(msg: CustomerSupportMessage) {
       ? '✨ PESANAN LAYANAN KHUSUS (CUSTOM)'
       : '💬 PERTANYAAN PELANGGAN';
 
-  // 1. Kirim Notifikasi Chat Instan ke HP via Telegram Bot (Jika Token diisi di .env)
   const tgToken = process.env.TELEGRAM_BOT_TOKEN;
   const tgChatId = process.env.TELEGRAM_CHAT_ID;
 
@@ -68,7 +66,6 @@ async function notifyOwnerPhone(msg: CustomerSupportMessage) {
     }
   }
 
-  // 2. Kirim Notifikasi ke Gmail Pemilik Toko
   const gmailUser = process.env.GMAIL_USER;
   const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
 
@@ -95,9 +92,6 @@ async function notifyOwnerPhone(msg: CustomerSupportMessage) {
               <strong>Isi Pesan:</strong><br/>
               <p style="white-space: pre-line; margin-bottom: 0;">${msg.message}</p>
             </div>
-            <p style="font-size: 12px; color: #64748B; margin-top: 16px;">
-              Pesan ini juga sudah tersimpan otomatis di tab <strong>Pesan & Klaim</strong> pada halaman Admin RizzFlow kamu.
-            </p>
           </div>
         `,
       });
@@ -109,15 +103,27 @@ async function notifyOwnerPhone(msg: CustomerSupportMessage) {
 
 export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+
+    // Jika parameter ?config=1 dipanggil oleh halaman toko, kembalikan pengaturan Layanan Kustom
+    if (searchParams.get('config') === '1') {
+      const customServiceConfig = await getStoredCustomServiceConfig();
+      return NextResponse.json({ customServiceConfig });
+    }
+
     const isAdmin = await verifyAdminAuth(request);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     }
 
-    const messages = await getStoredCustomerMessages();
-    return NextResponse.json({ messages });
+    const [messages, customServiceConfig] = await Promise.all([
+      getStoredCustomerMessages(),
+      getStoredCustomServiceConfig(),
+    ]);
+
+    return NextResponse.json({ messages, customServiceConfig });
   } catch {
-    return NextResponse.json({ error: 'Gagal memuat pesan.' }, { status: 500 });
+    return NextResponse.json({ error: 'Gagal memuat data.' }, { status: 500 });
   }
 }
 
@@ -154,7 +160,6 @@ export async function POST(request: Request) {
     const updated = [newMsg, ...existing];
     await saveStoredCustomerMessages(updated);
 
-    // Kirim notifikasi instan ke HP pemilik toko
     await notifyOwnerPhone(newMsg);
 
     return NextResponse.json({
@@ -165,6 +170,38 @@ export async function POST(request: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Gagal mengirim pesan.';
     return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const isAdmin = await verifyAdminAuth(request);
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
+    }
+
+    const body = (await request.json()) as Partial<CustomServiceConfig>;
+    const cleanServices = Array.isArray(body.services)
+      ? body.services.map((s) => s.trim()).filter((s) => s.length > 0)
+      : [];
+
+    const newConfig: CustomServiceConfig = {
+      title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
+      description: (body.description || '').trim(),
+      services: cleanServices,
+    };
+
+    await saveStoredCustomServiceConfig(newConfig);
+    return NextResponse.json({
+      success: true,
+      customServiceConfig: newConfig,
+      message: 'Pengaturan Layanan Kustom berhasil diperbarui!',
+    });
+  } catch {
+    return NextResponse.json(
+      { error: 'Gagal menyimpan pengaturan Layanan Kustom.' },
+      { status: 500 }
+    );
   }
 }
 
