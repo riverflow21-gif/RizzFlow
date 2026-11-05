@@ -1,23 +1,49 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #0f172a;
+  /* Palet Warna Utama Botanical Forest & Sage (Gambar 3) */
+  --rf-pine: #0F2A1D;       /* Hijau Hutan Sangat Gelap (Header, Teks Utama, Tombol +) */
+  --rf-woodland: #375534;   /* Hijau Tua Kalem (Tombol Utama, Pil Aktif, Banner) */
+  --rf-sage: #6B9071;       /* Hijau Daun Redup (Badge, Aksen Ikon, Hover) */
+  --rf-mist: #AEC3B0;       /* Abu Hijau Lembut (Border Halus, Indikator) */
+  --rf-cream: #E3EED4;      /* Krem Pistachio Lembut (Bingkai Foto, Pil Navigasi) */
+  --rf-bg: #F6F8F3;         /* Latar Belakang Utama Alabaster Hangat */
+  --rf-surface: #FFFFFF;    /* Permukaan Kartu Bersih */
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: var(--rf-bg);
+  color: var(--rf-pine);
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
 }
 
-/* Menyembunyikan scrollbar kasar pada deretan tombol kategori di layar HP */
+/* Menyembunyikan scrollbar kasar pada deretan pil kategori & galeri foto */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Efek bayangan lembut khas aplikasi butik modern (Gambar 1 & 2) */
+.rf-card-shadow {
+  box-shadow: 0 8px 28px -6px rgba(15, 42, 29, 0.06), 0 2px 8px -2px rgba(15, 42, 29, 0.04);
+}
+
+.rf-bottom-bar-shadow {
+  box-shadow: 0 12px 36px -4px rgba(15, 42, 29, 0.16), 0 4px 12px -2px rgba(15, 42, 29, 0.08);
 }
