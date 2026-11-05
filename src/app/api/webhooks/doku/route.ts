@@ -1,64 +1,120 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin, buildProductDeliveryItems } from '@/lib/supabase';
-import { verifyDokuWebhookSignature } from '@/lib/doku';
+import crypto from 'crypto';
+import {
+  getSupabaseAdmin,
+  buildProductDeliveryItems,
+  sendAdminTelegramNotification,
+} from '@/lib/supabase';
 import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
-import { DokuWebhookPayload, Order, OrderItem } from '@/types';
+import { Order, OrderItem, Product } from '@/types';
+
+interface DokuWebhookBody {
+  order?: {
+    invoice_number?: string;
+    amount?: number;
+  };
+  transaction?: {
+    status?: string;
+    date?: string;
+  };
+}
+
+function checkDokuSignature(params: {
+  clientId: string;
+  requestId: string;
+  requestTimestamp: string;
+  rawBody: string;
+  signatureHeader: string;
+}): boolean {
+  const secretKey = process.env.DOKU_SECRET_KEY || '';
+  if (!secretKey) return false;
+
+  const digest = crypto
+    .createHash('sha256')
+    .update(params.rawBody, 'utf8')
+    .digest('base64');
+
+  const requestTarget = '/api/webhooks/doku';
+  const componentSignature =
+    `Client-Id:${params.clientId}\n` +
+    `Request-Id:${params.requestId}\n` +
+    `Request-Timestamp:${params.requestTimestamp}\n` +
+    `Request-Target:${requestTarget}\n` +
+    `Digest:${digest}`;
+
+  const hmac = crypto
+    .createHmac('sha256', secretKey)
+    .update(componentSignature, 'utf8')
+    .digest('base64');
+
+  const expectedSignature = `HMACSHA256=${hmac}`;
+  return params.signatureHeader === expectedSignature;
+}
 
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
-    const clientIdHeader = request.headers.get('Client-Id') || '';
-    const requestIdHeader = request.headers.get('Request-Id') || '';
-    const requestTimestampHeader = request.headers.get('Request-Timestamp') || '';
+    const clientId = request.headers.get('Client-Id') || '';
+    const requestId = request.headers.get('Request-Id') || '';
+    const requestTimestamp = request.headers.get('Request-Timestamp') || '';
     const signatureHeader = request.headers.get('Signature') || '';
 
-    // 1. Verifikasi Signature keamanan dari DOKU
-    const isValidSignature = verifyDokuWebhookSignature({
-      clientIdHeader,
-      requestIdHeader,
-      requestTimestampHeader,
-      signatureHeader,
-      requestTarget: '/api/webhooks/doku',
-      rawBody,
-    });
+    const isSimulationMode = process.env.DOKU_SIMULATION_MODE === 'true';
+    const isSimulationBypass =
+      isSimulationMode && signatureHeader === 'SIMULATION_BYPASS';
 
-    if (!isValidSignature) {
-      return NextResponse.json({ error: 'Signature DOKU tidak valid.' }, { status: 401 });
+    if (!isSimulationBypass) {
+      const isValid = checkDokuSignature({
+        clientId,
+        requestId,
+        requestTimestamp,
+        rawBody,
+        signatureHeader,
+      });
+
+      if (!isValid) {
+        return NextResponse.json(
+          { error: 'Invalid DOKU Webhook Signature' },
+          { status: 401 }
+        );
+      }
     }
 
-    const payload = JSON.parse(rawBody) as DokuWebhookPayload;
+    const payload = JSON.parse(rawBody) as DokuWebhookBody;
     const invoiceNumber = payload.order?.invoice_number;
-    const transactionStatus = (payload.transaction?.status || '').toUpperCase();
+    const transactionStatus = payload.transaction?.status;
 
     if (!invoiceNumber) {
-      return NextResponse.json({ error: 'Nomor invoice tidak ditemukan pada payload.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing invoice_number' },
+        { status: 400 }
+      );
     }
 
-    if (transactionStatus !== 'SUCCESS' && transactionStatus !== 'PAID') {
-      return NextResponse.json({ message: `Status ${transactionStatus} diabaikan.` });
+    if (transactionStatus !== 'SUCCESS') {
+      return NextResponse.json({ received: true, status: transactionStatus });
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-
-    // 2. Ambil data pesanan berdasarkan nomor invoice
-    const { data: orderData, error: orderError } = await supabaseAdmin
+    const { data: orderData, error: orderErr } = await supabaseAdmin
       .from('orders')
-      .select('*')
+      .select('*, order_items(*)')
       .eq('invoice_number', invoiceNumber)
       .maybeSingle();
 
-    if (orderError || !orderData) {
-      return NextResponse.json({ error: 'Data pesanan tidak ditemukan.' }, { status: 404 });
+    if (orderErr || !orderData) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
     const order = orderData as Order;
-
     if (order.payment_status === 'PAID') {
-      return NextResponse.json({ message: 'Pesanan sudah berstatus PAID sebelumnya.' });
+      return NextResponse.json({
+        received: true,
+        message: 'Order already processed',
+      });
     }
 
-    // 3. Ubah status pesanan di database menjadi PAID
-    const { error: updateError } = await supabaseAdmin
+    await supabaseAdmin
       .from('orders')
       .update({
         payment_status: 'PAID',
@@ -66,59 +122,63 @@ export async function POST(request: Request) {
       })
       .eq('id', order.id);
 
-    if (updateError) {
-      throw new Error(`Gagal memperbarui status pembayaran: ${updateError.message}`);
-    }
+    const orderItems = (order.order_items || []) as OrderItem[];
+    const productIds = orderItems
+      .map((i) => i.product_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
-    // 4. Ambil daftar produk yang dibeli pada pesanan ini
-    const { data: orderItemsData } = await supabaseAdmin
-      .from('order_items')
+    const { data: productsData } = await supabaseAdmin
+      .from('products')
       .select('*')
-      .eq('order_id', order.id);
+      .in('id', productIds);
 
-    const orderItems = (orderItemsData || []) as OrderItem[];
-    const fileLinks: PurchasedFileLink[] = [];
+    const productList = (productsData || []) as Product[];
+    const deliveryFiles: PurchasedFileLink[] = [];
 
-    // 5. Kumpulkan semua file unduhan (Signed URL) dan link eksternal (Google Drive) untuk tiap produk
     for (const item of orderItems) {
       if (!item.product_id) continue;
+      const product = productList.find((p) => p.id === item.product_id);
+      if (!product) continue;
 
-      const { data: productData } = await supabaseAdmin
-        .from('products')
-        .select('file_path, title')
-        .eq('id', item.product_id)
-        .maybeSingle();
-
-      if (productData?.file_path) {
-        try {
-          const deliveryItems = await buildProductDeliveryItems({
-            productTitle: item.product_title,
-            quantity: item.quantity,
-            rawFilePath: productData.file_path,
-          });
-          fileLinks.push(...deliveryItems);
-        } catch (err) {
-          console.error('Gagal menyiapkan link produk:', err);
-        }
-      }
+      const builtLinks = await buildProductDeliveryItems({
+        productTitle: item.product_title,
+        quantity: item.quantity,
+        rawFilePath: product.file_path,
+      });
+      deliveryFiles.push(...builtLinks);
     }
 
-    // 6. Kirimkan email otomatis ke pelanggan
-    if (fileLinks.length > 0) {
+    if (deliveryFiles.length > 0) {
       await sendProductDeliveryEmail({
         toEmail: order.customer_email,
         invoiceNumber: order.invoice_number,
         totalPaid: order.final_amount,
-        files: fileLinks,
+        files: deliveryFiles,
       });
     }
 
+    const itemsSummary = orderItems
+      .map((i) => `• ${i.product_title} (x${i.quantity})`)
+      .join('\n');
+
+    await sendAdminTelegramNotification(
+      `✅ *PEMBAYARAN PRODUK LUNAS!*\n\n` +
+        `🧾 Invoice: *#${order.invoice_number}*\n` +
+        `📧 Pembeli: ${order.customer_email}\n` +
+        `💵 Total Lunas: *Rp${order.final_amount.toLocaleString('id-ID')}*\n\n` +
+        `📦 *Produk Terkirim:*\n${itemsSummary}`
+    );
+
     return NextResponse.json({
-      success: true,
-      message: 'Pembayaran berhasil diverifikasi dan email produk telah dikirim.',
+      received: true,
+      invoice_number: order.invoice_number,
+      status: 'PAID_AND_DELIVERED',
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Gagal memproses webhook DOKU.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('Webhook processing error:', err);
+    return NextResponse.json(
+      { error: 'Internal Webhook Error' },
+      { status: 500 }
+    );
   }
 }

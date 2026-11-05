@@ -13,18 +13,16 @@ import {
   UserCheck,
   ShieldCheck,
   CheckCircle2,
-  Heart,
+  X,
 } from 'lucide-react';
 import { Product } from '@/types';
-import { getProductCardInfo, formatRupiah } from './StorefrontTypes';
+import { getProductCardInfo, formatRupiah, LOGO_PATH } from './StorefrontTypes';
 
 type DetailSubTab = 'deskripsi' | 'akses' | 'garansi';
 
 interface ProductDetailSheetProps {
   product: Product | null;
   storeName: string;
-  isFavorite: boolean;
-  onToggleFavorite: (productId: string) => void;
   onClose: () => void;
   onAddWithQuantity: (product: Product, quantity: number) => void;
 }
@@ -32,8 +30,6 @@ interface ProductDetailSheetProps {
 export default function ProductDetailSheet({
   product,
   storeName,
-  isFavorite,
-  onToggleFavorite,
   onClose,
   onAddWithQuantity,
 }: ProductDetailSheetProps) {
@@ -41,7 +37,6 @@ export default function ProductDetailSheet({
   const [quantity, setQuantity] = useState(1);
   const [detailTab, setDetailTab] = useState('deskripsi' as DetailSubTab);
 
-  // Reset foto pertama, jumlah = 1, dan tab deskripsi setiap kali membuka produk baru
   useEffect(() => {
     if (product) {
       setActiveImageIndex(0);
@@ -53,7 +48,7 @@ export default function ProductDetailSheet({
   if (!product) return null;
 
   const info = getProductCardInfo(product);
-  const images = info.thumbList.length > 0 ? info.thumbList : ['/logo.jpg'];
+  const images = info.thumbList.length > 0 ? info.thumbList : [LOGO_PATH];
   const totalPrice = product.price * quantity;
 
   return (
@@ -73,7 +68,7 @@ export default function ProductDetailSheet({
           onClick={(e) => e.stopPropagation()}
           className="relative bg-[#F6F8F3] w-full sm:max-w-lg rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl h-[68vh] sm:h-[76vh] flex flex-col touch-auto border border-[#AEC3B0]/50"
         >
-          {/* Bar Atas Lembaran Detail (Tombol < Kembali, Judul "Details", & Tombol Hati Favorit) */}
+          {/* Bar Atas Lembaran Detail */}
           <div className="px-5 pt-3.5 pb-2.5 flex items-center justify-between bg-[#F6F8F3] shrink-0">
             <button
               type="button"
@@ -90,17 +85,11 @@ export default function ProductDetailSheet({
 
             <button
               type="button"
-              onClick={() => onToggleFavorite(product.id)}
-              className="w-9 h-9 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/50 flex items-center justify-center shadow-xs transition-transform active:scale-90"
-              aria-label="Simpan ke Favorit"
+              onClick={onClose}
+              className="w-9 h-9 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/50 flex items-center justify-center shadow-xs transition-colors"
+              aria-label="Tutup"
             >
-              <Heart
-                className={
-                  isFavorite
-                    ? 'w-4 h-4 fill-[#375534] text-[#375534]'
-                    : 'w-4 h-4 text-[#0F2A1D]'
-                }
-              />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
@@ -108,7 +97,6 @@ export default function ProductDetailSheet({
           {/* SATU WADAH SCROLL TERPADU: GAMBAR IKUT TER-SCROLL KE ATAS */}
           {/* ================================================================ */}
           <div className="flex-1 overflow-y-auto overscroll-contain px-5 pt-1 pb-6 space-y-5">
-            {/* Bingkai Foto Produk Membulat + Indikator Titik Slide (Gaya Gambar 1 Kanan) */}
             <div className="space-y-2.5">
               <div className="relative aspect-[16/11] rounded-[24px] bg-[#E3EED4] overflow-hidden border border-[#AEC3B0]/50 shadow-xs">
                 <img
@@ -151,7 +139,6 @@ export default function ProductDetailSheet({
                 )}
               </div>
 
-              {/* Indikator Titik Kapsul di Bawah Foto (Persis Gambar 1 Kanan) */}
               {images.length > 1 && (
                 <div className="flex items-center justify-center gap-1.5">
                   {images.map((_, idx) => (
@@ -171,7 +158,6 @@ export default function ProductDetailSheet({
               )}
             </div>
 
-            {/* Judul Produk & Badge */}
             <div className="space-y-1">
               {product.badge && (
                 <span className="inline-block px-3 py-0.5 rounded-full bg-[#E3EED4] text-[#375534] text-xs font-extrabold">
@@ -183,13 +169,13 @@ export default function ProductDetailSheet({
               </h2>
             </div>
 
-            {/* Baris Info Toko Official + Pengatur Jumlah [- 1 +] (Persis Gambar 1 Kanan) */}
+            {/* Baris Info Toko Official + Pengatur Jumlah [- 1 +] */}
             <div className="p-3.5 rounded-2xl bg-white border border-[#AEC3B0]/40 flex items-center justify-between gap-3 rf-card-shadow">
               <div className="flex items-center gap-2.5 min-w-0">
                 <img
-                  src="/logo.jpg"
+                  src={LOGO_PATH}
                   alt={storeName}
-                  className="w-9 h-9 rounded-xl object-cover border border-[#AEC3B0]/50 shrink-0"
+                  className="w-9 h-9 rounded-xl object-contain bg-[#F6F8F3] p-0.5 border border-[#AEC3B0]/50 shrink-0"
                 />
                 <div className="min-w-0">
                   <div className="flex items-center gap-1">
@@ -204,7 +190,6 @@ export default function ProductDetailSheet({
                 </div>
               </div>
 
-              {/* Pengatur Jumlah QTY */}
               <div className="inline-flex items-center gap-2.5 bg-[#E3EED4]/70 border border-[#AEC3B0]/60 rounded-full px-2.5 py-1 shrink-0">
                 <button
                   type="button"
@@ -226,7 +211,7 @@ export default function ProductDetailSheet({
               </div>
             </div>
 
-            {/* 3 Tab Informasi di Dalam Detail (Persis Gambar 2 Kanan) */}
+            {/* 3 Tab Informasi di Dalam Detail */}
             <div className="space-y-3">
               <div className="flex items-center gap-5 border-b border-[#AEC3B0]/50">
                 <button
@@ -295,7 +280,7 @@ export default function ProductDetailSheet({
               </div>
             </div>
 
-            {/* 4 Lingkaran Keunggulan di Bawah Deskripsi (Persis 4 Ikon Bulat di Gambar 2 Kanan) */}
+            {/* 4 Lingkaran Keunggulan di Bawah Deskripsi */}
             <div className="grid grid-cols-4 gap-2 pt-1">
               <div className="flex flex-col items-center text-center">
                 <div className="w-11 h-11 rounded-full bg-[#E3EED4] text-[#375534] flex items-center justify-center mb-1.5">
@@ -335,9 +320,7 @@ export default function ProductDetailSheet({
             </div>
           </div>
 
-          {/* ================================================================ */}
-          {/* STICKY CAPSULE BOTTOM BAR (PERSIS GAMBAR 1 KANAN BAWAH) */}
-          {/* ================================================================ */}
+          {/* STICKY CAPSULE BOTTOM BAR */}
           <div className="p-4 sm:px-6 bg-white border-t border-[#AEC3B0]/40 flex items-center justify-between gap-4 shrink-0">
             <div>
               <span className="block text-[11px] font-semibold text-[#6B9071]">

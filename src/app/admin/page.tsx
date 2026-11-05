@@ -9,13 +9,14 @@ import {
   parseProductDeliverables,
   CustomerSupportMessage,
   CustomServiceConfig,
+  CustomProjectOrder,
   DEFAULT_CUSTOM_SERVICE_CONFIG,
 } from '@/lib/supabase';
 import {
+  LayoutDashboard,
   Package,
   FolderTree,
   TicketPercent,
-  ShoppingBag,
   Settings,
   LogOut,
   Plus,
@@ -37,6 +38,7 @@ import {
   BellRing,
   Smartphone,
   Search,
+  KeyRound,
 } from 'lucide-react';
 import {
   Category,
@@ -46,13 +48,16 @@ import {
   StoreSettings,
 } from '@/types';
 
+// 5 Halaman Utama Admin yang Kompleks & Rapi
 type AdminTab =
-  | 'products'
-  | 'messages'
-  | 'orders'
-  | 'categories'
+  | 'dashboard'
+  | 'catalog'
+  | 'services'
   | 'promos'
   | 'settings';
+
+type CatalogActionPanel = 'NONE' | 'ADD_PRODUCT' | 'MANAGE_CATEGORIES';
+type ServicesSubTab = 'CUSTOM_ORDERS' | 'INBOX_MESSAGES';
 
 interface FeedbackBanner {
   type: 'success' | 'error';
@@ -62,6 +67,7 @@ interface FeedbackBanner {
 interface PendingCounts {
   paidOrders: number;
   unreadMsgs: number;
+  customQueues: number;
 }
 
 interface PwaInstallEvent extends Event {
@@ -74,8 +80,10 @@ type NullablePendingCounts = PendingCounts | null;
 type NullableProduct = Product | null;
 type NullableString = string | null;
 
+const LOGO_PATH = '/logo.jpg?v=2';
+
 /**
- * Membunyikan nada dering alarm di HP/Laptop Admin saat ada pesanan lunas atau pesan klaim baru.
+ * Membunyikan nada dering alarm di HP/Laptop Admin saat ada pesanan, proyek kustom, atau klaim baru.
  */
 function playAdminNotificationBeep() {
   try {
@@ -105,7 +113,7 @@ function playAdminNotificationBeep() {
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('products' as AdminTab);
+  const [activeTab, setActiveTab] = useState('dashboard' as AdminTab);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [accessToken, setAccessToken] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
@@ -127,6 +135,9 @@ export default function AdminDashboardPage() {
   const [supportMessages, setSupportMessages] = useState(
     [] as CustomerSupportMessage[]
   );
+  const [customOrders, setCustomOrders] = useState(
+    [] as CustomProjectOrder[]
+  );
   const [settings, setSettings] = useState({
     id: 1,
     store_name: 'RizzFlow',
@@ -138,11 +149,21 @@ export default function AdminDashboardPage() {
     DEFAULT_CUSTOM_SERVICE_CONFIG as CustomServiceConfig
   );
 
-  // State Form Tambah & Edit Produk Digital Instan
+  // State Halaman 1 (Dashboard & Riwayat Penjualan)
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [resendingOrderId, setResendingOrderId] = useState(
+    null as NullableString
+  );
+
+  // State Halaman 2 (Produk & Kategori dalam 1 Halaman dengan Tombol Terpisah)
+  const [catalogPanel, setCatalogPanel] = useState(
+    'NONE' as CatalogActionPanel
+  );
   const [editingProduct, setEditingProduct] = useState(
     null as NullableProduct
   );
   const [adminProductSearch, setAdminProductSearch] = useState('');
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState('ALL');
   const [prodTitle, setProdTitle] = useState('');
   const [prodCategoryId, setProdCategoryId] = useState('');
   const [prodPrice, setProdPrice] = useState('');
@@ -155,9 +176,30 @@ export default function AdminDashboardPage() {
   const [fileInputKey, setFileInputKey] = useState(0);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
-  // State Form Kategori & Kode Promo
   const [catName, setCatName] = useState('');
   const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  // State Halaman 3 (Pesan & Antrian Layanan Kustom)
+  const [servicesSubTab, setServicesSubTab] = useState(
+    'CUSTOM_ORDERS' as ServicesSubTab
+  );
+  const [customPriceDraft, setCustomPriceDraft] = useState(
+    {} as { [key: string]: string }
+  );
+  const [customNoteDraft, setCustomNoteDraft] = useState(
+    {} as { [key: string]: string }
+  );
+  const [customLinkDraft, setCustomLinkDraft] = useState(
+    {} as { [key: string]: string }
+  );
+  const [customFilesDraft, setCustomFilesDraft] = useState(
+    {} as { [key: string]: File[] }
+  );
+  const [updatingCustomId, setUpdatingCustomId] = useState(
+    null as NullableString
+  );
+
+  // State Halaman 4 (Kode Promo)
   const [promoCode, setPromoCode] = useState('');
   const [promoPercent, setPromoPercent] = useState('20');
   const [promoMaxRp, setPromoMaxRp] = useState('15000');
@@ -165,12 +207,9 @@ export default function AdminDashboardPage() {
   const [promoExpiresAt, setPromoExpiresAt] = useState('');
   const [isSavingPromo, setIsSavingPromo] = useState(false);
 
-  // State Pengaturan Toko & Kirim Ulang Email
+  // State Halaman 5 (Pengaturan Toko, Layanan Kustom, & Bot Telegram)
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSavingCustomService, setIsSavingCustomService] = useState(false);
-  const [resendingOrderId, setResendingOrderId] = useState(
-    null as NullableString
-  );
 
   const showMessage = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
@@ -210,7 +249,7 @@ export default function AdminDashboardPage() {
 
   const handleEnableBrowserNotifications = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      showMessage('error', 'Browser HP kamu belum mendukung fitur notifikasi.');
+      showMessage('error', 'Browser perangkatmu belum mendukung notifikasi.');
       return;
     }
 
@@ -219,18 +258,15 @@ export default function AdminDashboardPage() {
 
     if (permission === 'granted') {
       playAdminNotificationBeep();
-      new Notification('Notifikasi Admin RizzFlow Aktif!', {
-        body: 'HP kamu akan berbunyi saat ada pesanan lunas atau pesan klaim baru.',
-        icon: '/logo.jpg',
+      new Notification('Alarm Admin RizzFlow Aktif!', {
+        body: 'Perangkatmu akan berbunyi saat ada pembelian, pesanan kustom, atau klaim baru.',
+        icon: LOGO_PATH,
       });
-      showMessage(
-        'success',
-        'Notifikasi HP dan bunyi alarm berhasil diaktifkan!'
-      );
+      showMessage('success', 'Alarm & Notifikasi HP berhasil diaktifkan!');
     } else {
       showMessage(
         'error',
-        'Izin notifikasi ditolak. Aktifkan izin notifikasi di pengaturan browser kamu.'
+        'Izin notifikasi ditolak. Aktifkan izin notifikasi di pengaturan browser.'
       );
     }
   };
@@ -242,7 +278,7 @@ export default function AdminDashboardPage() {
     } else {
       showMessage(
         'success',
-        'Untuk menjadikan aplikasi di HP: Klik menu titik tiga di pojok kanan atas browser Chrome/Safari kamu, lalu pilih "Tambahkan ke Layar Utama" (Add to Home Screen).'
+        'Untuk memasang aplikasi di HP: Klik menu titik tiga di pojok kanan atas browser Chrome/Safari, lalu pilih "Tambahkan ke Layar Utama" (Add to Home Screen).'
       );
     }
   };
@@ -321,16 +357,24 @@ export default function AdminDashboardPage() {
           });
 
           let currentUnreadMsgs = 0;
+          let currentCustomQueues = 0;
 
           if (msgRes.ok) {
             const msgData = (await msgRes.json()) as {
               messages?: CustomerSupportMessage[];
               customServiceConfig?: CustomServiceConfig;
+              customOrders?: CustomProjectOrder[];
             };
             if (msgData.messages) {
               setSupportMessages(msgData.messages);
               currentUnreadMsgs = msgData.messages.filter(
                 (m) => m.status === 'BARU'
+              ).length;
+            }
+            if (msgData.customOrders) {
+              setCustomOrders(msgData.customOrders);
+              currentCustomQueues = msgData.customOrders.filter(
+                (o) => o.status === 'MENUNGGU_PENGERJAAN'
               ).length;
             }
             if (msgData.customServiceConfig && !isBackgroundPoll) {
@@ -342,7 +386,8 @@ export default function AdminDashboardPage() {
             const prev = prevCountsRef.current;
             if (
               currentPaidCount > prev.paidOrders ||
-              currentUnreadMsgs > prev.unreadMsgs
+              currentUnreadMsgs > prev.unreadMsgs ||
+              currentCustomQueues > prev.customQueues
             ) {
               playAdminNotificationBeep();
               if (
@@ -350,12 +395,14 @@ export default function AdminDashboardPage() {
                 'Notification' in window &&
                 Notification.permission === 'granted'
               ) {
-                new Notification('Notifikasi Baru di RizzFlow!', {
+                new Notification('Aktivitas Baru di Toko RizzFlow!', {
                   body:
                     currentPaidCount > prev.paidOrders
-                      ? 'Ada pesanan produk digital baru yang telah dibayar lunas!'
-                      : 'Ada pesan klaim garansi / layanan kustom baru yang masuk!',
-                  icon: '/logo.jpg',
+                      ? 'Ada pembayaran pesanan baru yang telah lunas!'
+                      : currentCustomQueues > prev.customQueues
+                      ? 'Ada pesanan Layanan Kustom baru yang masuk ke antrian!'
+                      : 'Ada pesan pelanggan / klaim garansi baru!',
+                  icon: LOGO_PATH,
                 });
               }
             }
@@ -364,9 +411,10 @@ export default function AdminDashboardPage() {
           prevCountsRef.current = {
             paidOrders: currentPaidCount,
             unreadMsgs: currentUnreadMsgs,
+            customQueues: currentCustomQueues,
           };
         } catch (e) {
-          console.error('Gagal memuat pesan pelanggan:', e);
+          console.error('Gagal memuat pesan & layanan kustom:', e);
         }
       }
     },
@@ -396,7 +444,6 @@ export default function AdminDashboardPage() {
     verifyAdmin();
   }, [router, fetchAllAdminData]);
 
-  // Polling otomatis setiap 15 detik untuk mengecek pesanan atau klaim baru
   useEffect(() => {
     if (!accessToken) return;
     const interval = setInterval(() => {
@@ -408,10 +455,11 @@ export default function AdminDashboardPage() {
   const selectTab = (tab: AdminTab) => {
     setActiveTab(tab);
     setIsMobileSidebarOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // ==========================================================================
-  // 1. LOGIKA MANAJEMEN PRODUK DIGITAL (TAMBAH BARU, EDIT, & PENCARIAN)
+  // 1. LOGIKA PRODUK & KATEGORI (DALAM 1 HALAMAN DENGAN TOMBOL TERPISAH)
   // ==========================================================================
   const handleAddLinkRow = () => setProductLinks((prev) => [...prev, '']);
   const handleUpdateLinkRow = (index: number, value: string) =>
@@ -426,6 +474,7 @@ export default function AdminDashboardPage() {
   const handleStartEditProduct = (product: Product) => {
     const deliverables = parseProductDeliverables(product.file_path);
     setEditingProduct(product);
+    setCatalogPanel('ADD_PRODUCT');
     setProdTitle(product.title);
     setProdCategoryId(product.category_id || '');
     setProdPrice(String(product.price));
@@ -447,6 +496,7 @@ export default function AdminDashboardPage() {
 
   const handleCancelEditProduct = () => {
     setEditingProduct(null);
+    setCatalogPanel('NONE');
     setProdTitle('');
     setProdPrice('');
     setProdOriginalPrice('');
@@ -483,7 +533,7 @@ export default function AdminDashboardPage() {
     ) {
       showMessage(
         'error',
-        'Harap unggah minimal 1 File Produk ATAU masukkan minimal 1 Link Produk (seperti Google Drive).'
+        'Harap unggah minimal 1 File Produk ATAU masukkan minimal 1 Link Produk.'
       );
       return;
     }
@@ -551,7 +601,6 @@ export default function AdminDashboardPage() {
         files: uploadedFilePaths,
         links: validLinks,
         original_price: numericOriginalPrice,
-        product_type: 'INSTAN',
       });
 
       if (editingProduct) {
@@ -583,7 +632,7 @@ export default function AdminDashboardPage() {
         });
 
         if (insertErr) throw new Error(insertErr.message);
-        showMessage('success', 'Produk baru berhasil disimpan!');
+        showMessage('success', 'Produk baru berhasil diterbitkan!');
       }
 
       handleCancelEditProduct();
@@ -605,7 +654,7 @@ export default function AdminDashboardPage() {
       .eq('id', product.id);
     if (!error) {
       await fetchAllAdminData();
-      showMessage('success', 'Status produk diperbarui.');
+      showMessage('success', 'Status tampilan produk diperbarui.');
     }
   };
 
@@ -616,13 +665,10 @@ export default function AdminDashboardPage() {
       .eq('id', product.id);
     if (!error) {
       await fetchAllAdminData();
-      showMessage('success', 'Produk berhasil dihapus.');
+      showMessage('success', 'Produk berhasil dihapus dari katalog.');
     }
   };
 
-  // ==========================================================================
-  // 2. LOGIKA KATEGORI, PROMO, PESAN, & PENGATURAN
-  // ==========================================================================
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!catName.trim()) return;
@@ -639,7 +685,7 @@ export default function AdminDashboardPage() {
       if (error) throw new Error(error.message);
       setCatName('');
       await fetchAllAdminData();
-      showMessage('success', 'Kategori baru ditambahkan!');
+      showMessage('success', 'Kategori baru berhasil ditambahkan!');
     } catch (err) {
       showMessage(
         'error',
@@ -654,10 +700,175 @@ export default function AdminDashboardPage() {
     const { error } = await supabase.from('categories').delete().eq('id', id);
     if (!error) {
       await fetchAllAdminData();
-      showMessage('success', 'Kategori dihapus.');
+      showMessage('success', 'Kategori berhasil dihapus.');
     }
   };
 
+  // ==========================================================================
+  // 2. LOGIKA ANTRIAN TRANSAKSI LAYANAN KUSTOM (UPLOAD FILE & KIRIM TAGIHAN)
+  // ==========================================================================
+  const handleCompleteCustomOrderAndSendBill = async (
+    customOrd: CustomProjectOrder
+  ) => {
+    const rawPrice =
+      customPriceDraft[customOrd.id] !== undefined
+        ? customPriceDraft[customOrd.id]
+        : String(customOrd.price || '');
+    const numericPrice = Math.max(0, Number(rawPrice) || 0);
+
+    if (numericPrice < 1000) {
+      showMessage(
+        'error',
+        'Harap isi Harga Tagihan minimal Rp1.000 sebelum menandai pesanan selesai.'
+      );
+      return;
+    }
+
+    const selectedFiles = customFilesDraft[customOrd.id] || [];
+    const externalLink = (
+      customLinkDraft[customOrd.id] !== undefined
+        ? customLinkDraft[customOrd.id]
+        : customOrd.delivery_links[0] || ''
+    ).trim();
+
+    if (
+      selectedFiles.length === 0 &&
+      customOrd.file_paths.length === 0 &&
+      !externalLink
+    ) {
+      showMessage(
+        'error',
+        'Harap unggah minimal 1 File Produk Kustom ATAU isi Link Hasil Pengerjaan terlebih dahulu.'
+      );
+      return;
+    }
+
+    setUpdatingCustomId(customOrd.id);
+    try {
+      const timestamp = Date.now();
+      let finalFilePaths = [...customOrd.file_paths];
+
+      if (selectedFiles.length > 0) {
+        const uploadedPaths: string[] = [];
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const f = selectedFiles[i];
+          const cleanName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const storagePath = `custom_${customOrd.order_code}_${timestamp}_${i}_${cleanName}`;
+
+          const { error: upErr } = await supabase.storage
+            .from('digital-products')
+            .upload(storagePath, f, { upsert: false });
+
+          if (upErr) {
+            throw new Error(`Gagal mengunggah file kustom: ${upErr.message}`);
+          }
+          uploadedPaths.push(storagePath);
+        }
+        finalFilePaths = uploadedPaths;
+      }
+
+      const finalLinks = externalLink ? [externalLink] : [];
+      const finalNote =
+        customNoteDraft[customOrd.id] !== undefined
+          ? customNoteDraft[customOrd.id]
+          : 'Produk kustom kamu telah selesai dikerjakan! Silakan selesaikan pembayaran tagihan via QRIS untuk mengunduh file produkmu.';
+
+      const res = await fetch('/api/messages', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          target_type: 'CUSTOM_ORDER',
+          id: customOrd.id,
+          status: 'SIAP_DIBAYAR',
+          price: numericPrice,
+          admin_note: finalNote,
+          file_paths: finalFilePaths,
+          delivery_links: finalLinks,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        customOrders?: CustomProjectOrder[];
+        message?: string;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal menyimpan produk kustom.');
+      }
+
+      if (data.customOrders) setCustomOrders(data.customOrders);
+      showMessage(
+        'success',
+        data.message ||
+          `Pesanan ${customOrd.order_code} selesai & email tagihan telah dikirim ke pelanggan!`
+      );
+    } catch (err) {
+      showMessage(
+        'error',
+        err instanceof Error ? err.message : 'Gagal memproses pesanan kustom.'
+      );
+    } finally {
+      setUpdatingCustomId(null);
+    }
+  };
+
+  const handleDeleteCustomOrder = async (id: string) => {
+    const res = await fetch(`/api/messages?id=${id}&type=CUSTOM_ORDER`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        customOrders?: CustomProjectOrder[];
+      };
+      if (data.customOrders) setCustomOrders(data.customOrders);
+      showMessage('success', 'Data pesanan kustom dihapus.');
+    }
+  };
+
+  const handleToggleMessageStatus = async (msg: CustomerSupportMessage) => {
+    const nextStatus = msg.status === 'BARU' ? 'SELESAI' : 'BARU';
+    const res = await fetch('/api/messages', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        target_type: 'MESSAGE',
+        id: msg.id,
+        status: nextStatus,
+      }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        messages?: CustomerSupportMessage[];
+      };
+      if (data.messages) setSupportMessages(data.messages);
+    }
+  };
+
+  const handleDeleteSupportMessage = async (id: string) => {
+    const res = await fetch(`/api/messages?id=${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        messages?: CustomerSupportMessage[];
+      };
+      if (data.messages) setSupportMessages(data.messages);
+      showMessage('success', 'Pesan dihapus.');
+    }
+  };
+
+  // ==========================================================================
+  // 3. LOGIKA KODE PROMO, RIWAYAT ORDER, & PENGATURAN (+ BOT TELEGRAM)
+  // ==========================================================================
   const handleCreatePromo = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingPromo(true);
@@ -696,7 +907,7 @@ export default function AdminDashboardPage() {
       .eq('id', promo.id);
     if (!error) {
       await fetchAllAdminData();
-      showMessage('success', 'Status promo diperbarui.');
+      showMessage('success', 'Status kode promo diperbarui.');
     }
   };
 
@@ -705,38 +916,6 @@ export default function AdminDashboardPage() {
     if (!error) {
       await fetchAllAdminData();
       showMessage('success', 'Kode promo dihapus.');
-    }
-  };
-
-  const handleToggleMessageStatus = async (msg: CustomerSupportMessage) => {
-    const nextStatus = msg.status === 'BARU' ? 'SELESAI' : 'BARU';
-    const res = await fetch('/api/messages', {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ id: msg.id, status: nextStatus }),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as {
-        messages?: CustomerSupportMessage[];
-      };
-      if (data.messages) setSupportMessages(data.messages);
-    }
-  };
-
-  const handleDeleteSupportMessage = async (id: string) => {
-    const res = await fetch(`/api/messages?id=${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as {
-        messages?: CustomerSupportMessage[];
-      };
-      if (data.messages) setSupportMessages(data.messages);
-      showMessage('success', 'Pesan dihapus.');
     }
   };
 
@@ -783,7 +962,7 @@ export default function AdminDashboardPage() {
     } catch (err) {
       showMessage(
         'error',
-        err instanceof Error ? err.message : 'Gagal menyimpan.'
+        err instanceof Error ? err.message : 'Gagal menyimpan pengaturan.'
       );
     } finally {
       setIsSavingSettings(false);
@@ -834,17 +1013,18 @@ export default function AdminDashboardPage() {
       };
 
       if (!res.ok) {
-        throw new Error(data.error || 'Gagal menyimpan Layanan Kustom.');
+        throw new Error(data.error || 'Gagal menyimpan pengaturan.');
       }
       if (data.customServiceConfig) setCustomService(data.customServiceConfig);
       showMessage(
         'success',
-        data.message || 'Pengaturan Layanan Kustom disimpan!'
+        data.message ||
+          'Pengaturan Layanan Kustom & Notifikasi Telegram disimpan!'
       );
     } catch (err) {
       showMessage(
         'error',
-        err instanceof Error ? err.message : 'Gagal menyimpan Layanan Kustom.'
+        err instanceof Error ? err.message : 'Gagal menyimpan pengaturan.'
       );
     } finally {
       setIsSavingCustomService(false);
@@ -854,84 +1034,87 @@ export default function AdminDashboardPage() {
   if (isLoadingInitial) {
     return (
       <div className="min-h-screen bg-[#F6F8F3] flex items-center justify-center">
-        <div className="flex items-center gap-2 text-sm font-bold text-[#0F2A1D]">
+        <div className="flex items-center gap-2.5 text-sm font-extrabold text-[#0F2A1D]">
           <Loader2 className="w-5 h-5 animate-spin text-[#375534]" />
-          <span>Memuat Panel Admin RizzFlow...</span>
+          <span>Memuat Panel Admin {settings.store_name}...</span>
         </div>
       </div>
     );
   }
 
+  // Kalkulasi Analitik Dashboard
   const paidOrdersList = orders.filter((o) => o.payment_status === 'PAID');
+  const pendingOrdersList = orders.filter(
+    (o) => o.payment_status === 'PENDING'
+  );
   const totalPaidRevenue = paidOrdersList.reduce(
     (acc, o) => acc + o.final_amount,
     0
   );
 
+  const todayIsoPrefix = new Date().toISOString().slice(0, 10);
+  const todayRevenue = paidOrdersList
+    .filter((o) => (o.paid_at || o.created_at).startsWith(todayIsoPrefix))
+    .reduce((acc, o) => acc + o.final_amount, 0);
+
   const unreadMessagesCount = supportMessages.filter(
     (m) => m.status === 'BARU'
   ).length;
+  const activeCustomQueuesCount = customOrders.filter(
+    (o) => o.status === 'MENUNGGU_PENGERJAAN'
+  ).length;
+  const totalServiceAlerts = unreadMessagesCount + activeCustomQueuesCount;
 
   const navBtnClass = (tab: AdminTab) =>
     activeTab === tab
-      ? 'flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors bg-[#0F2A1D] text-[#E3EED4] shadow-sm'
-      : 'flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors text-[#375534] hover:bg-[#E3EED4]/60 hover:text-[#0F2A1D]';
+      ? 'flex items-center justify-between gap-2 px-4 py-3 rounded-2xl text-xs sm:text-sm font-extrabold transition-all bg-[#E3EED4] text-[#0F2A1D] shadow-xs'
+      : 'flex items-center justify-between gap-2 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all text-[#AEC3B0] hover:bg-[#375534]/50 hover:text-white';
 
   const renderSidebarNavItems = () => (
     <nav className="flex flex-col gap-1.5">
       <button
         type="button"
-        onClick={() => selectTab('products')}
-        className={navBtnClass('products')}
+        onClick={() => selectTab('dashboard')}
+        className={navBtnClass('dashboard')}
+      >
+        <div className="flex items-center gap-3">
+          <LayoutDashboard className="w-4 h-4 shrink-0" />
+          <span>Dashboard &amp; Penjualan</span>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => selectTab('catalog')}
+        className={navBtnClass('catalog')}
       >
         <div className="flex items-center gap-3">
           <Package className="w-4 h-4 shrink-0" />
-          <span>Produk ({products.length})</span>
+          <span>Produk &amp; Kategori</span>
         </div>
+        <span className="text-[11px] opacity-80">{products.length}</span>
       </button>
 
       <button
         type="button"
-        onClick={() => selectTab('messages')}
-        className={navBtnClass('messages')}
+        onClick={() => selectTab('services')}
+        className={navBtnClass('services')}
       >
         <div className="flex items-center gap-3">
           <Inbox className="w-4 h-4 shrink-0" />
-          <span>Pesan &amp; Klaim</span>
+          <span>Pesan &amp; Layanan Kustom</span>
         </div>
-        {unreadMessagesCount > 0 && (
+        {totalServiceAlerts > 0 && (
           <span
             className={
-              activeTab === 'messages'
-                ? 'px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-[#E3EED4] text-[#0F2A1D]'
-                : 'px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-[#375534] text-white'
+              activeTab === 'services'
+                ? 'px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-[#0F2A1D] text-[#E3EED4]'
+                : 'px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-[#E3EED4] text-[#0F2A1D]'
             }
           >
-            {unreadMessagesCount}
+            {totalServiceAlerts}
           </span>
         )}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => selectTab('orders')}
-        className={navBtnClass('orders')}
-      >
-        <div className="flex items-center gap-3">
-          <ShoppingBag className="w-4 h-4 shrink-0" />
-          <span>Riwayat Pembelian ({orders.length})</span>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => selectTab('categories')}
-        className={navBtnClass('categories')}
-      >
-        <div className="flex items-center gap-3">
-          <FolderTree className="w-4 h-4 shrink-0" />
-          <span>Kategori ({categories.length})</span>
-        </div>
       </button>
 
       <button
@@ -941,8 +1124,9 @@ export default function AdminDashboardPage() {
       >
         <div className="flex items-center gap-3">
           <TicketPercent className="w-4 h-4 shrink-0" />
-          <span>Kode Promo ({promos.length})</span>
+          <span>Kode Promo</span>
         </div>
+        <span className="text-[11px] opacity-80">{promos.length}</span>
       </button>
 
       <button
@@ -952,7 +1136,7 @@ export default function AdminDashboardPage() {
       >
         <div className="flex items-center gap-3">
           <Settings className="w-4 h-4 shrink-0" />
-          <span>Pengaturan &amp; Kustom</span>
+          <span>Pengaturan &amp; Telegram</span>
         </div>
       </button>
     </nav>
@@ -961,66 +1145,61 @@ export default function AdminDashboardPage() {
   return (
     <div className="min-h-screen bg-[#F6F8F3] text-[#0F2A1D] flex flex-col md:flex-row overflow-x-hidden">
       {/* HEADER ATAS KHUSUS HP */}
-      <header className="md:hidden sticky top-0 z-30 bg-white border-b border-[#AEC3B0]/50 px-4 h-14 flex items-center justify-between">
+      <header className="md:hidden sticky top-0 z-30 bg-[#0F2A1D] text-[#E3EED4] px-4 h-15 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             type="button"
             onClick={() => setIsMobileSidebarOpen(true)}
-            className="p-2 rounded-xl bg-[#F6F8F3] hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/60 relative"
-            aria-label="Buka Menu Samping"
+            className="p-2 rounded-xl bg-[#375534]/80 text-[#E3EED4] border border-[#6B9071]/40 relative"
+            aria-label="Buka Menu Admin"
           >
-            <Menu className="w-5 h-5 text-[#0F2A1D]" />
-            {unreadMessagesCount > 0 && (
-              <span className="w-2.5 h-2.5 rounded-full bg-[#375534] absolute -top-0.5 -right-0.5" />
+            <Menu className="w-5 h-5" />
+            {totalServiceAlerts > 0 && (
+              <span className="w-2.5 h-2.5 rounded-full bg-[#E3EED4] absolute -top-0.5 -right-0.5" />
             )}
           </button>
-          <span className="font-extrabold text-sm text-[#0F2A1D] truncate">
+          <img
+            src={LOGO_PATH}
+            alt="Logo"
+            className="h-8 w-8 rounded-lg object-contain bg-white p-0.5 shrink-0"
+          />
+          <span className="font-extrabold text-sm text-white truncate">
             Admin {settings.store_name}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <Link
-            href="/"
-            className="p-2 rounded-lg bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/60"
-            title="Lihat Toko"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </Link>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-bold inline-flex items-center gap-1"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Keluar</span>
-          </button>
-        </div>
+        <Link
+          href="/"
+          className="px-3 py-1.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] text-xs font-extrabold inline-flex items-center gap-1"
+        >
+          <span>Toko</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </Link>
       </header>
 
       {/* SIDE NAVBAR DRAWER DI SAMPING KIRI (UNTUK LAYAR HP) */}
       {isMobileSidebarOpen && (
         <div
           onClick={() => setIsMobileSidebarOpen(false)}
-          className="fixed inset-0 z-50 bg-[#0F2A1D]/60 backdrop-blur-xs md:hidden flex"
+          className="fixed inset-0 z-50 bg-[#0F2A1D]/70 backdrop-blur-xs md:hidden flex"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-64 bg-white h-full shadow-2xl flex flex-col justify-between p-5"
+            className="w-68 bg-[#0F2A1D] text-[#E3EED4] h-full shadow-2xl flex flex-col justify-between p-5"
           >
             <div>
-              <div className="flex items-center justify-between mb-6 pb-3 border-b border-[#AEC3B0]/40">
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#375534]">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img
-                    src="/logo.jpg"
+                    src={LOGO_PATH}
                     alt="Logo"
-                    className="h-8 w-8 rounded-lg object-cover"
+                    className="h-9 w-9 rounded-xl object-contain bg-white p-0.5"
                   />
                   <div className="min-w-0">
-                    <div className="font-extrabold text-sm text-[#0F2A1D] truncate">
+                    <div className="font-extrabold text-sm text-white truncate">
                       {settings.store_name}
                     </div>
-                    <div className="text-[11px] text-[#6B9071] truncate">
+                    <div className="text-[11px] text-[#AEC3B0] truncate">
                       {adminEmail}
                     </div>
                   </div>
@@ -1028,7 +1207,7 @@ export default function AdminDashboardPage() {
                 <button
                   type="button"
                   onClick={() => setIsMobileSidebarOpen(false)}
-                  className="p-1.5 rounded-lg text-[#6B9071] hover:bg-[#F6F8F3]"
+                  className="p-1.5 rounded-lg text-[#AEC3B0] hover:text-white"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1037,18 +1216,11 @@ export default function AdminDashboardPage() {
               {renderSidebarNavItems()}
             </div>
 
-            <div className="pt-4 border-t border-[#AEC3B0]/40 space-y-2">
-              <Link
-                href="/"
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-[#0F2A1D] bg-[#E3EED4]"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>Lihat Halaman Toko</span>
-              </Link>
+            <div className="pt-4 border-t border-[#375534] space-y-2">
               <button
                 type="button"
                 onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-red-700 bg-red-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold text-red-200 bg-red-950/70 border border-red-400/30"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Keluar (Logout)</span>
@@ -1059,20 +1231,20 @@ export default function AdminDashboardPage() {
       )}
 
       {/* SIDEBAR NAVBAR TETAP DI SAMPING KIRI (UNTUK DESKTOP/LAPTOP) */}
-      <aside className="hidden md:flex md:w-64 bg-white border-r border-[#AEC3B0]/50 shrink-0 flex-col justify-between min-h-screen sticky top-0">
+      <aside className="hidden md:flex md:w-68 bg-[#0F2A1D] text-[#E3EED4] shrink-0 flex-col justify-between min-h-screen sticky top-0 shadow-xl">
         <div className="p-5">
-          <div className="flex items-center justify-between gap-2 mb-6">
-            <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-7 pb-4 border-b border-[#375534]">
+            <div className="flex items-center gap-3 min-w-0">
               <img
-                src="/logo.jpg"
+                src={LOGO_PATH}
                 alt={settings.store_name}
-                className="h-9 w-9 rounded-xl object-cover shrink-0"
+                className="h-10 w-10 rounded-xl object-contain bg-white p-0.5 shrink-0"
               />
               <div className="min-w-0">
-                <div className="font-extrabold text-base text-[#0F2A1D] truncate">
+                <div className="font-extrabold text-base text-white truncate">
                   {settings.store_name}
                 </div>
-                <div className="text-[11px] text-[#6B9071] truncate">
+                <div className="text-[11px] text-[#AEC3B0] truncate">
                   {adminEmail}
                 </div>
               </div>
@@ -1080,7 +1252,7 @@ export default function AdminDashboardPage() {
 
             <Link
               href="/"
-              className="p-2 rounded-lg bg-[#F6F8F3] hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/60"
+              className="p-2 rounded-xl bg-[#375534] hover:bg-[#6B9071] text-[#E3EED4] transition-colors"
               title="Lihat Halaman Toko"
             >
               <ExternalLink className="w-4 h-4" />
@@ -1090,11 +1262,11 @@ export default function AdminDashboardPage() {
           {renderSidebarNavItems()}
         </div>
 
-        <div className="p-4 border-t border-[#AEC3B0]/40">
+        <div className="p-5 border-t border-[#375534]">
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold text-red-200 bg-red-950/60 hover:bg-red-900/80 border border-red-400/30 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             <span>Keluar (Logout)</span>
@@ -1102,73 +1274,10 @@ export default function AdminDashboardPage() {
         </div>
       </aside>
 
-      {/* Area Konten Utama Admin */}
+      {/* ==================================================================== */}
+      {/* AREA KONTEN UTAMA 5 HALAMAN ADMIN */}
+      {/* ==================================================================== */}
       <main className="flex-1 min-w-0 p-4 sm:p-8 max-w-5xl w-full mx-auto overflow-x-hidden">
-        {/* Baris Aplikasi Mobile Admin (PWA) & Pengaktif Notifikasi Bunyi di HP */}
-        <div className="mb-5 p-4 rounded-2xl bg-[#E3EED4] border border-[#AEC3B0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs text-[#0F2A1D]">
-            <strong className="font-extrabold text-[#0F2A1D]">
-              📱 Mode Aplikasi Mobile Admin &amp; Alarm Pesanan:
-            </strong>{' '}
-            Pasang halaman Admin ini di layar utama HP kamu dan aktifkan alarm agar berbunyi saat ada pesanan atau pesan masuk.
-          </div>
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              type="button"
-              onClick={handleEnableBrowserNotifications}
-              className={
-                notifPermission === 'granted'
-                  ? 'px-3.5 py-2 rounded-full text-xs font-extrabold inline-flex items-center gap-1.5 border bg-white text-[#375534] border-[#6B9071]'
-                  : 'px-3.5 py-2 rounded-full text-xs font-extrabold inline-flex items-center gap-1.5 bg-[#375534] text-white'
-              }
-            >
-              <BellRing className="w-3.5 h-3.5" />
-              <span>
-                {notifPermission === 'granted'
-                  ? 'Notif & Suara Aktif'
-                  : 'Aktifkan Notif HP'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleInstallPwaApp}
-              className="px-3.5 py-2 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-extrabold inline-flex items-center gap-1.5"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Jadikan Aplikasi HP</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Ringkasan Statistik Cepat */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 mb-6">
-          <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 rf-card-shadow min-w-0">
-            <span className="text-xs text-[#6B9071] font-bold">
-              Total Pendapatan Lunas
-            </span>
-            <div className="text-lg sm:text-2xl font-extrabold text-[#375534] mt-1 truncate">
-              Rp{totalPaidRevenue.toLocaleString('id-ID')}
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 rf-card-shadow min-w-0">
-            <span className="text-xs text-[#6B9071] font-bold">
-              Pesanan Lunas
-            </span>
-            <div className="text-lg sm:text-2xl font-extrabold text-[#0F2A1D] mt-1">
-              {paidOrdersList.length} Transaksi
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 rf-card-shadow col-span-2 sm:col-span-1 min-w-0">
-            <span className="text-xs text-[#6B9071] font-bold">
-              Pesan &amp; Klaim Masuk
-            </span>
-            <div className="text-lg sm:text-2xl font-extrabold text-[#0F2A1D] mt-1">
-              {unreadMessagesCount} Belum Dibaca
-            </div>
-          </div>
-        </div>
-
         {feedback && (
           <div
             className={
@@ -1187,275 +1296,169 @@ export default function AdminDashboardPage() {
         )}
 
         {/* ================================================================== */}
-        {/* TAB 1: MANAJEMEN PRODUK DIGITAL INSTAN */}
+        {/* HALAMAN 1: DASHBOARD ANALITIK, PENDAPATAN & RIWAYAT PENJUALAN */}
         {/* ================================================================== */}
-        {activeTab === 'products' && (
-          <div className="space-y-8">
-            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
-                <div>
-                  <h2 className="text-lg font-extrabold text-[#0F2A1D]">
-                    {editingProduct
-                      ? `Edit Produk: ${editingProduct.title}`
-                      : 'Tambah Produk Digital Baru'}
-                  </h2>
-                  <p className="text-xs text-[#6B9071] mt-0.5">
-                    {editingProduct
-                      ? 'Ubah rincian di bawah ini lalu klik Simpan Perubahan. Kosongkan input gambar/file jika tidak ingin mengganti gambar/file lama.'
-                      : 'Mendukung fitur Harga Coret, multi-gambar sampul, multi-file unduhan, dan link Google Drive.'}
-                  </p>
-                </div>
-
-                {editingProduct && (
-                  <button
-                    type="button"
-                    onClick={handleCancelEditProduct}
-                    className="self-start sm:self-center px-3.5 py-2 rounded-full bg-red-50 hover:bg-red-100 text-red-700 text-xs font-extrabold inline-flex items-center gap-1.5 shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                    <span>Batal Edit</span>
-                  </button>
-                )}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            {/* Header Dashboard & Kontrol Cepat Aplikasi Mobile Admin */}
+            <div className="rounded-[28px] bg-[#0F2A1D] text-[#E3EED4] p-6 sm:p-7 border border-[#375534] shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#AEC3B0]">
+                  Ringkasan Eksekutif Toko
+                </span>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
+                  Dashboard Pendapatan &amp; Penjualan
+                </h1>
+                <p className="text-xs text-[#AEC3B0]">
+                  Pantau arus kas masuk, pesanan produk instan, dan antrian proyek kustom secara real-time.
+                </p>
               </div>
 
-              <form onSubmit={handleCreateProduct} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      Nama Produk Digital *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={prodTitle}
-                      onChange={(e) => setProdTitle(e.target.value)}
-                      placeholder="Contoh: Paket E-Book & Template Excel"
-                      className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
-                    />
-                  </div>
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <button
+                  type="button"
+                  onClick={handleEnableBrowserNotifications}
+                  className={
+                    notifPermission === 'granted'
+                      ? 'px-3.5 py-2.5 rounded-full text-xs font-extrabold inline-flex items-center gap-1.5 bg-[#375534] text-[#E3EED4] border border-[#6B9071]'
+                      : 'px-3.5 py-2.5 rounded-full text-xs font-extrabold inline-flex items-center gap-1.5 bg-[#E3EED4] text-[#0F2A1D]'
+                  }
+                >
+                  <BellRing className="w-3.5 h-3.5" />
+                  <span>
+                    {notifPermission === 'granted'
+                      ? 'Alarm Pesanan Aktif'
+                      : 'Aktifkan Alarm HP'}
+                  </span>
+                </button>
 
-                  <div>
-                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      Kategori Produk *
-                    </label>
-                    <select
-                      value={prodCategoryId}
-                      onChange={(e) => setProdCategoryId(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
-                    >
-                      <option value="">-- Tanpa Kategori --</option>
-                      {categories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      Harga Jual Saat Ini (Rp) *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      value={prodPrice}
-                      onChange={(e) => setProdPrice(e.target.value)}
-                      placeholder="Contoh: 35000"
-                      className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#375534] mb-1">
-                      Harga Asli / Harga Coret (Opsional — Rp)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={prodOriginalPrice}
-                      onChange={(e) => setProdOriginalPrice(e.target.value)}
-                      placeholder="Contoh: 99000"
-                      className="w-full px-3.5 py-2.5 bg-[#E3EED4]/45 border border-[#6B9071]/50 rounded-xl text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                    Label Badge (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    value={prodBadge}
-                    onChange={(e) => setProdBadge(e.target.value)}
-                    placeholder="Contoh: Terlaris / Baru"
-                    className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                    Deskripsi Lengkap Produk *
-                  </label>
-                  <textarea
-                    rows={3}
-                    required
-                    value={prodDesc}
-                    onChange={(e) => setProdDesc(e.target.value)}
-                    placeholder="Jelaskan detail produk, keunggulan, dan apa saja yang didapat pembeli..."
-                    className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-dashed border-[#6B9071] min-w-0">
-                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      1. Pilih Gambar Sampul / Thumbnail (Bisa lebih dari 1){' '}
-                      {editingProduct ? '(Opsional saat Edit)' : '*'}
-                    </label>
-                    <input
-                      key={`thumb-${fileInputKey}`}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) =>
-                        setThumbnailFiles(
-                          e.target.files ? Array.from(e.target.files) : []
-                        )
-                      }
-                      className="text-xs text-[#0F2A1D] w-full mt-1"
-                    />
-                    {thumbnailFiles.length > 0 && (
-                      <p className="text-[11px] font-bold text-[#375534] mt-2 break-all">
-                        ✓ {thumbnailFiles.length} gambar dipilih
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#E3EED4]/55 border border-dashed border-[#375534] min-w-0">
-                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      2A. Upload File Produk (Opsional — Bisa lebih dari 1 file)
-                    </label>
-                    <input
-                      key={`digital-${fileInputKey}`}
-                      type="file"
-                      multiple
-                      onChange={(e) =>
-                        setDigitalFiles(
-                          e.target.files ? Array.from(e.target.files) : []
-                        )
-                      }
-                      className="text-xs text-[#0F2A1D] w-full mt-1"
-                    />
-                    {digitalFiles.length > 0 && (
-                      <p className="text-[11px] font-bold text-[#375534] mt-2 break-all">
-                        ✓ {digitalFiles.length} file dipilih
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="block text-xs font-bold text-[#0F2A1D]">
-                      2B. Link Produk Eksternal / Google Drive (Opsional)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleAddLinkRow}
-                      className="px-3 py-1.5 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0] text-[#0F2A1D] text-xs font-bold inline-flex items-center gap-1 shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Tambah Link</span>
-                    </button>
-                  </div>
-
-                  {productLinks.map((linkVal, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <div className="relative flex-1 min-w-0">
-                        <LinkIcon className="w-4 h-4 text-[#6B9071] absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="url"
-                          value={linkVal}
-                          onChange={(e) =>
-                            handleUpdateLinkRow(idx, e.target.value)
-                          }
-                          placeholder="https://drive.google.com/..."
-                          className="w-full pl-9 pr-3 py-2 bg-white border border-[#AEC3B0]/60 rounded-xl text-xs sm:text-sm"
-                        />
-                      </div>
-                      {productLinks.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveLinkRow(idx)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 shrink-0"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    disabled={isSavingProduct}
-                    className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] disabled:bg-[#AEC3B0] text-white font-extrabold text-xs sm:text-sm inline-flex items-center gap-2 transition-colors"
-                  >
-                    {isSavingProduct ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Menyimpan...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4 text-[#E3EED4]" />
-                        <span>
-                          {editingProduct
-                            ? 'Simpan Perubahan Produk'
-                            : 'Simpan & Terbitkan Produk'}
-                        </span>
-                      </>
-                    )}
-                  </button>
-
-                  {editingProduct && (
-                    <button
-                      type="button"
-                      onClick={handleCancelEditProduct}
-                      className="px-5 py-3 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0] text-[#0F2A1D] font-bold text-xs sm:text-sm"
-                    >
-                      Batal
-                    </button>
-                  )}
-                </div>
-              </form>
+                <button
+                  type="button"
+                  onClick={handleInstallPwaApp}
+                  className="px-3.5 py-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white border border-[#AEC3B0]/40 text-xs font-extrabold inline-flex items-center gap-1.5"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Pasang Aplikasi Admin</span>
+                </button>
+              </div>
             </div>
 
-            {/* Daftar Katalog Produk Dilengkapi Kolom Pencarian & Tombol Edit */}
+            {/* 6 Kartu Statistik Kompleks */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+              <div className="bg-white p-5 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
+                <span className="text-xs font-bold text-[#6B9071]">
+                  Total Pendapatan Lunas
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D] mt-1.5 truncate">
+                  Rp{totalPaidRevenue.toLocaleString('id-ID')}
+                </div>
+                <span className="text-[11px] font-bold text-[#375534] mt-1 block">
+                  ✓ {paidOrdersList.length} transaksi selesai
+                </span>
+              </div>
+
+              <div className="bg-white p-5 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
+                <span className="text-xs font-bold text-[#6B9071]">
+                  Pendapatan Hari Ini
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#375534] mt-1.5 truncate">
+                  Rp{todayRevenue.toLocaleString('id-ID')}
+                </div>
+                <span className="text-[11px] text-[#6B9071] mt-1 block">
+                  Update otomatis harian
+                </span>
+              </div>
+
+              <div className="bg-white p-5 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
+                <span className="text-xs font-bold text-[#6B9071]">
+                  Menunggu Pembayaran QRIS
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D] mt-1.5">
+                  {pendingOrdersList.length} Pesanan
+                </div>
+                <span className="text-[11px] text-[#6B9071] mt-1 block">
+                  Belum dipindai pembeli
+                </span>
+              </div>
+
+              <div
+                onClick={() => selectTab('catalog')}
+                className="bg-white p-5 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow cursor-pointer hover:border-[#375534] transition-colors"
+              >
+                <span className="text-xs font-bold text-[#6B9071]">
+                  Total Produk &amp; Kategori
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D] mt-1.5">
+                  {products.length} Produk
+                </div>
+                <span className="text-[11px] font-bold text-[#375534] mt-1 block">
+                  Dalam {categories.length} kategori →
+                </span>
+              </div>
+
+              <div
+                onClick={() => {
+                  setServicesSubTab('CUSTOM_ORDERS');
+                  selectTab('services');
+                }}
+                className="bg-[#E3EED4]/75 p-5 rounded-3xl border border-[#6B9071]/60 rf-card-shadow cursor-pointer hover:bg-[#E3EED4] transition-colors"
+              >
+                <span className="text-xs font-extrabold text-[#375534]">
+                  Antrian Layanan Kustom
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D] mt-1.5">
+                  {activeCustomQueuesCount} Proyek
+                </div>
+                <span className="text-[11px] font-bold text-[#375534] mt-1 block">
+                  Klik untuk unggah hasil &amp; tagihan →
+                </span>
+              </div>
+
+              <div
+                onClick={() => {
+                  setServicesSubTab('INBOX_MESSAGES');
+                  selectTab('services');
+                }}
+                className="bg-white p-5 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow cursor-pointer hover:border-[#375534] transition-colors"
+              >
+                <span className="text-xs font-bold text-[#6B9071]">
+                  Klaim Garansi &amp; Pesan
+                </span>
+                <div className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D] mt-1.5">
+                  {unreadMessagesCount} Baru
+                </div>
+                <span className="text-[11px] font-bold text-[#375534] mt-1 block">
+                  Total {supportMessages.length} pesan masuk →
+                </span>
+              </div>
+            </div>
+
+            {/* Tabel Riwayat Penjualan & Pengiriman Ulang Email */}
             <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <h3 className="text-base font-extrabold text-[#0F2A1D]">
-                  Daftar Katalog Produk ({products.length})
-                </h3>
+                <div>
+                  <h2 className="text-lg font-extrabold text-[#0F2A1D]">
+                    Riwayat Transaksi &amp; Penjualan ({orders.length})
+                  </h2>
+                  <p className="text-xs text-[#6B9071]">
+                    Seluruh pesanan produk instan maupun pelunasan layanan kustom tercatat di sini.
+                  </p>
+                </div>
 
                 <div className="relative w-full sm:w-72">
                   <Search className="w-3.5 h-3.5 text-[#6B9071] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
-                    value={adminProductSearch}
-                    onChange={(e) => setAdminProductSearch(e.target.value)}
-                    placeholder="Cari nama produk untuk diedit..."
+                    value={orderSearchQuery}
+                    onChange={(e) => setOrderSearchQuery(e.target.value)}
+                    placeholder="Cari No. Invoice atau Email..."
                     className="w-full pl-9 pr-8 py-2 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-full text-xs text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
                   />
-                  {adminProductSearch && (
+                  {orderSearchQuery && (
                     <button
                       type="button"
-                      onClick={() => setAdminProductSearch('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B9071] hover:text-[#0F2A1D]"
+                      onClick={() => setOrderSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B9071]"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1463,20 +1466,504 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {orders.length === 0 ? (
+                <p className="text-sm text-[#6B9071] text-center py-10">
+                  Belum ada riwayat transaksi.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {orders
+                    .filter((ord) => {
+                      const q = orderSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        ord.invoice_number.toLowerCase().includes(q) ||
+                        ord.customer_email.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((ord) => (
+                      <div
+                        key={ord.id}
+                        className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-xs sm:text-sm text-[#0F2A1D]">
+                              #{ord.invoice_number}
+                            </span>
+                            <span
+                              className={
+                                ord.payment_status === 'PAID'
+                                  ? 'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071]'
+                                  : 'px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800'
+                              }
+                            >
+                              {ord.payment_status}
+                            </span>
+                            <span className="text-[11px] text-[#6B9071]">
+                              {new Date(ord.created_at).toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold text-[#0F2A1D] break-all">
+                            Pembeli:{' '}
+                            <span className="text-[#375534]">
+                              {ord.customer_email}
+                            </span>
+                          </p>
+                          <div className="text-sm font-extrabold text-[#0F2A1D]">
+                            Nominal: Rp
+                            {ord.final_amount.toLocaleString('id-ID')}
+                          </div>
+                        </div>
+
+                        {ord.payment_status === 'PAID' &&
+                          !ord.invoice_number.startsWith('INV-KST-') && (
+                            <button
+                              type="button"
+                              onClick={() => handleResendDownloadEmail(ord.id)}
+                              disabled={resendingOrderId === ord.id}
+                              className="px-4 py-2 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              <Send className="w-3.5 h-3.5 text-[#E3EED4]" />
+                              <span>
+                                {resendingOrderId === ord.id
+                                  ? 'Mengirim...'
+                                  : 'Kirim Ulang Email'}
+                              </span>
+                            </button>
+                          )}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* HALAMAN 2: PRODUK & KATEGORI (1 HALAMAN DENGAN TOMBOL TERPISAH) */}
+        {/* ================================================================== */}
+        {activeTab === 'catalog' && (
+          <div className="space-y-6">
+            {/* Baris Atas: Judul & 2 Tombol Aksi Terpisah (+ Tambah Produk | + Kelola Kategori) */}
+            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D]">
+                  Manajemen Produk &amp; Kategori
+                </h1>
+                <p className="text-xs text-[#6B9071] mt-0.5">
+                  Kelola seluruh katalog produk digital dan kategori dalam satu halaman terpadu.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (catalogPanel === 'ADD_PRODUCT' && !editingProduct) {
+                      setCatalogPanel('NONE');
+                    } else {
+                      handleCancelEditProduct();
+                      setCatalogPanel('ADD_PRODUCT');
+                    }
+                  }}
+                  className={
+                    catalogPanel === 'ADD_PRODUCT'
+                      ? 'px-4 py-2.5 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm'
+                      : 'px-4 py-2.5 rounded-full bg-[#375534] hover:bg-[#0F2A1D] text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm transition-colors'
+                  }
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>
+                    {editingProduct ? 'Mode Edit Produk' : 'Tambah Produk Baru'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCatalogPanel((prev) =>
+                      prev === 'MANAGE_CATEGORIES'
+                        ? 'NONE'
+                        : 'MANAGE_CATEGORIES'
+                    )
+                  }
+                  className={
+                    catalogPanel === 'MANAGE_CATEGORIES'
+                      ? 'px-4 py-2.5 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm'
+                      : 'px-4 py-2.5 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0] text-[#0F2A1D] text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors'
+                  }
+                >
+                  <FolderTree className="w-4 h-4" />
+                  <span>Tambah / Kelola Kategori ({categories.length})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* PANEL 1: FORM TAMBAH / EDIT PRODUK (Muncul Saat Tombol Produk Diklik) */}
+            {catalogPanel === 'ADD_PRODUCT' && (
+              <div className="bg-white p-5 sm:p-6 rounded-3xl border-2 border-[#375534] rf-card-shadow">
+                <div className="flex items-center justify-between gap-2 mb-5 pb-3 border-b border-[#AEC3B0]/40">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-extrabold text-[#0F2A1D]">
+                      {editingProduct
+                        ? `Edit Produk: ${editingProduct.title}`
+                        : 'Formulir Tambah Produk Digital Baru'}
+                    </h2>
+                    <p className="text-xs text-[#6B9071]">
+                      {editingProduct
+                        ? 'Kosongkan input gambar/file jika tidak ingin mengganti gambar/file lama.'
+                        : 'Isi rincian produk, unggah gambar sampul, lalu lampirkan file atau link Google Drive.'}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCancelEditProduct}
+                    className="p-2 rounded-full bg-[#F6F8F3] hover:bg-red-50 text-[#0F2A1D] hover:text-red-600"
+                    title="Tutup Formulir"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateProduct} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                        Nama Produk Digital *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={prodTitle}
+                        onChange={(e) => setProdTitle(e.target.value)}
+                        placeholder="Contoh: Paket E-Book & Template Excel"
+                        className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                        Kategori Produk *
+                      </label>
+                      <select
+                        value={prodCategoryId}
+                        onChange={(e) => setProdCategoryId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
+                      >
+                        <option value="">-- Tanpa Kategori --</option>
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                        Harga Jual Saat Ini (Rp) *
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="0"
+                        value={prodPrice}
+                        onChange={(e) => setProdPrice(e.target.value)}
+                        placeholder="Contoh: 35000"
+                        className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-[#375534] mb-1">
+                        Harga Asli / Harga Coret (Opsional — Rp)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={prodOriginalPrice}
+                        onChange={(e) => setProdOriginalPrice(e.target.value)}
+                        placeholder="Contoh: 99000"
+                        className="w-full px-3.5 py-2.5 bg-[#E3EED4]/45 border border-[#6B9071]/50 rounded-xl text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                      Label Badge (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={prodBadge}
+                      onChange={(e) => setProdBadge(e.target.value)}
+                      placeholder="Contoh: Terlaris / Baru"
+                      className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                      Deskripsi Lengkap Produk *
+                    </label>
+                    <textarea
+                      rows={3}
+                      required
+                      value={prodDesc}
+                      onChange={(e) => setProdDesc(e.target.value)}
+                      placeholder="Jelaskan detail produk, keunggulan, dan apa saja yang didapat pembeli..."
+                      className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-dashed border-[#6B9071] min-w-0">
+                      <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                        1. Pilih Gambar Sampul / Thumbnail (Bisa lebih dari 1){' '}
+                        {editingProduct ? '(Opsional saat Edit)' : '*'}
+                      </label>
+                      <input
+                        key={`thumb-${fileInputKey}`}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) =>
+                          setThumbnailFiles(
+                            e.target.files ? Array.from(e.target.files) : []
+                          )
+                        }
+                        className="text-xs text-[#0F2A1D] w-full mt-1"
+                      />
+                      {thumbnailFiles.length > 0 && (
+                        <p className="text-[11px] font-bold text-[#375534] mt-2 break-all">
+                          ✓ {thumbnailFiles.length} gambar dipilih
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-[#E3EED4]/55 border border-dashed border-[#375534] min-w-0">
+                      <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
+                        2A. Upload File Produk (Opsional — Bisa lebih dari 1 file)
+                      </label>
+                      <input
+                        key={`digital-${fileInputKey}`}
+                        type="file"
+                        multiple
+                        onChange={(e) =>
+                          setDigitalFiles(
+                            e.target.files ? Array.from(e.target.files) : []
+                          )
+                        }
+                        className="text-xs text-[#0F2A1D] w-full mt-1"
+                      />
+                      {digitalFiles.length > 0 && (
+                        <p className="text-[11px] font-bold text-[#375534] mt-2 break-all">
+                          ✓ {digitalFiles.length} file dipilih
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-xs font-bold text-[#0F2A1D]">
+                        2B. Link Produk Eksternal / Google Drive (Opsional)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAddLinkRow}
+                        className="px-3 py-1.5 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0] text-[#0F2A1D] text-xs font-bold inline-flex items-center gap-1 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Baris Link</span>
+                      </button>
+                    </div>
+
+                    {productLinks.map((linkVal, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className="relative flex-1 min-w-0">
+                          <LinkIcon className="w-4 h-4 text-[#6B9071] absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="url"
+                            value={linkVal}
+                            onChange={(e) =>
+                              handleUpdateLinkRow(idx, e.target.value)
+                            }
+                            placeholder="https://drive.google.com/..."
+                            className="w-full pl-9 pr-3 py-2 bg-white border border-[#AEC3B0]/60 rounded-xl text-xs sm:text-sm"
+                          />
+                        </div>
+                        {productLinks.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveLinkRow(idx)}
+                            className="p-2 rounded-lg text-red-600 hover:bg-red-50 shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isSavingProduct}
+                      className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] disabled:bg-[#AEC3B0] text-white font-extrabold text-xs sm:text-sm inline-flex items-center gap-2 transition-colors"
+                    >
+                      {isSavingProduct ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Menyimpan...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4 text-[#E3EED4]" />
+                          <span>
+                            {editingProduct
+                              ? 'Simpan Perubahan Produk'
+                              : 'Simpan & Terbitkan Produk'}
+                          </span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCancelEditProduct}
+                      className="px-5 py-3 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0] text-[#0F2A1D] font-bold text-xs sm:text-sm"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* PANEL 2: FORM TAMBAH & KELOLA KATEGORI (Muncul Saat Tombol Kategori Diklik) */}
+            {catalogPanel === 'MANAGE_CATEGORIES' && (
+              <div className="bg-white p-5 sm:p-6 rounded-3xl border-2 border-[#6B9071] rf-card-shadow space-y-5">
+                <div className="flex items-center justify-between border-b border-[#AEC3B0]/40 pb-3">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-extrabold text-[#0F2A1D]">
+                      Tambah &amp; Kelola Kategori Produk
+                    </h2>
+                    <p className="text-xs text-[#6B9071]">
+                      Buat kategori baru atau hapus kategori yang sudah tidak digunakan.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCatalogPanel('NONE')}
+                    className="p-2 rounded-full bg-[#F6F8F3] text-[#0F2A1D]"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateCategory} className="flex gap-2.5">
+                  <input
+                    type="text"
+                    required
+                    value={catName}
+                    onChange={(e) => setCatName(e.target.value)}
+                    placeholder="Ketik nama kategori baru (Contoh: Template Excel / E-Book)..."
+                    className="flex-1 min-w-0 px-4 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-full text-xs sm:text-sm"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSavingCategory}
+                    className="px-5 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-extrabold text-xs sm:text-sm inline-flex items-center gap-1.5 shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Simpan Kategori</span>
+                  </button>
+                </form>
+
+                <div className="flex flex-wrap gap-2">
+                  {categories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="inline-flex items-center gap-2 pl-4 pr-2 py-1.5 rounded-full bg-[#E3EED4] border border-[#6B9071]/50 text-xs font-extrabold text-[#0F2A1D]"
+                    >
+                      <span>{cat.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCategory(cat.id)}
+                        className="w-6 h-6 rounded-full bg-white hover:bg-red-50 text-red-600 flex items-center justify-center"
+                        title="Hapus Kategori"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Daftar Katalog Produk Dilengkapi Pencarian & Filter Kategori */}
+            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h3 className="text-base font-extrabold text-[#0F2A1D]">
+                  Daftar Katalog Produk ({products.length})
+                </h3>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                  <select
+                    value={adminCategoryFilter}
+                    onChange={(e) => setAdminCategoryFilter(e.target.value)}
+                    className="px-3.5 py-2 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-full text-xs font-bold text-[#0F2A1D]"
+                  >
+                    <option value="ALL">Semua Kategori</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-[#6B9071] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={adminProductSearch}
+                      onChange={(e) => setAdminProductSearch(e.target.value)}
+                      placeholder="Cari produk untuk diedit..."
+                      className="w-full pl-9 pr-8 py-2 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-full text-xs text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
+                    />
+                    {adminProductSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminProductSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B9071]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {products.length === 0 ? (
-                <p className="text-sm text-[#6B9071] py-6 text-center">
-                  Belum ada produk di katalog.
+                <p className="text-sm text-[#6B9071] py-8 text-center">
+                  Belum ada produk di katalog. Klik tombol &ldquo;Tambah Produk Baru&rdquo; di atas untuk memulai.
                 </p>
               ) : (
                 <div className="space-y-3">
                   {products
                     .filter((p) => {
+                      const matchesCat =
+                        adminCategoryFilter === 'ALL' ||
+                        p.category_id === adminCategoryFilter;
                       const q = adminProductSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
+                      const matchesSearch =
+                        !q ||
                         p.title.toLowerCase().includes(q) ||
-                        p.description.toLowerCase().includes(q)
-                      );
+                        p.description.toLowerCase().includes(q);
+                      return matchesCat && matchesSearch;
                     })
                     .map((prod) => {
                       const thumbs = parseThumbnails(prod.thumbnail_url);
@@ -1491,7 +1978,7 @@ export default function AdminDashboardPage() {
                         >
                           <div className="flex items-start gap-3.5 min-w-0 flex-1">
                             <img
-                              src={thumbs[0] || '/logo.jpg'}
+                              src={thumbs[0] || LOGO_PATH}
                               alt={prod.title}
                               className="w-14 h-14 rounded-xl object-cover bg-[#E3EED4] border border-[#AEC3B0]/50 shrink-0"
                             />
@@ -1570,251 +2057,403 @@ export default function AdminDashboardPage() {
         )}
 
         {/* ================================================================== */}
-        {/* TAB 2: PESAN PELANGGAN, KLAIM GARANSI & JASA KUSTOM */}
+        {/* HALAMAN 3: PESAN & ANTRIAN TRANSAKSI LAYANAN KUSTOM (KST-XXXX) */}
         {/* ================================================================== */}
-        {activeTab === 'messages' && (
-          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
-            <h2 className="text-lg font-extrabold text-[#0F2A1D] mb-1">
-              Kotak Masuk Pesan, Klaim Garansi &amp; Layanan Kustom ({supportMessages.length})
-            </h2>
-            <p className="text-xs text-[#6B9071] mb-5">
-              Seluruh pengaduan garansi dan pesanan jasa kustom dari halaman Layanan masuk ke sini.
-            </p>
+        {activeTab === 'services' && (
+          <div className="space-y-6">
+            {/* Switch Sub-Halaman: Antrian Proyek Kustom vs Kotak Masuk Klaim */}
+            <div className="grid grid-cols-2 gap-2.5 bg-white p-2 rounded-full border border-[#AEC3B0]/60 rf-card-shadow">
+              <button
+                type="button"
+                onClick={() => setServicesSubTab('CUSTOM_ORDERS')}
+                className={
+                  servicesSubTab === 'CUSTOM_ORDERS'
+                    ? 'py-2.5 px-4 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-xs sm:text-sm font-extrabold transition-all'
+                    : 'py-2.5 px-4 rounded-full text-[#375534] hover:text-[#0F2A1D] text-xs sm:text-sm font-bold transition-all'
+                }
+              >
+                ✨ Antrian Layanan Kustom ({customOrders.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setServicesSubTab('INBOX_MESSAGES')}
+                className={
+                  servicesSubTab === 'INBOX_MESSAGES'
+                    ? 'py-2.5 px-4 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-xs sm:text-sm font-extrabold transition-all'
+                    : 'py-2.5 px-4 rounded-full text-[#375534] hover:text-[#0F2A1D] text-xs sm:text-sm font-bold transition-all'
+                }
+              >
+                🛡️ Klaim Garansi &amp; Pesan ({supportMessages.length})
+              </button>
+            </div>
 
-            {supportMessages.length === 0 ? (
-              <p className="text-sm text-[#6B9071] text-center py-12">
-                Belum ada pesan yang masuk.
-              </p>
-            ) : (
-              <div className="space-y-3.5">
-                {supportMessages.map((msg) => {
-                  const cleanWa = msg.sender_contact.replace(/[^0-9]/g, '');
-                  const waLink = cleanWa
-                    ? `https://wa.me/${
-                        cleanWa.startsWith('0')
-                          ? '62' + cleanWa.slice(1)
-                          : cleanWa
-                      }`
-                    : null;
+            {servicesSubTab === 'CUSTOM_ORDERS' ? (
+              <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow space-y-5">
+                <div>
+                  <h2 className="text-lg font-extrabold text-[#0F2A1D]">
+                    Antrian Pemesanan &amp; Pengiriman Produk Layanan Kustom
+                  </h2>
+                  <p className="text-xs text-[#6B9071] mt-0.5">
+                    Saat produk kustom selesai kamu kerjakan, unggah filenya di kolom pemesan di bawah, tentukan harga tagihan, lalu klik <strong>Tandai Selesai &amp; Kirim Tagihan via Email</strong>. Pelanggan akan mengakses tagihan dengan kode <code>KST-XXXX</code> miliknya, dan produk otomatis terkirim begitu ia membayar!
+                  </p>
+                </div>
 
-                  return (
-                    <div
-                      key={msg.id}
-                      className={
-                        msg.status === 'BARU'
-                          ? 'p-4 rounded-2xl border min-w-0 bg-[#E3EED4]/45 border-[#6B9071]'
-                          : 'p-4 rounded-2xl border min-w-0 bg-[#F6F8F3] border-[#AEC3B0]/60'
-                      }
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071]/50">
-                            {msg.type === 'KLAIM_GARANSI'
-                              ? '🛡️ Klaim Garansi'
-                              : msg.type === 'LAYANAN_KHUSUS'
-                              ? '✨ Pesan Jasa Kustom'
-                              : '💬 Pertanyaan'}
-                          </span>
-                          <span className="font-extrabold text-sm text-[#0F2A1D]">
-                            {msg.sender_name}
-                          </span>
-                        </div>
+                {customOrders.length === 0 ? (
+                  <p className="text-sm text-[#6B9071] text-center py-12">
+                    Belum ada antrian pesanan layanan kustom.
+                  </p>
+                ) : (
+                  <div className="space-y-5">
+                    {customOrders.map((cOrd) => {
+                      const isBusy = updatingCustomId === cOrd.id;
+                      const priceVal =
+                        customPriceDraft[cOrd.id] !== undefined
+                          ? customPriceDraft[cOrd.id]
+                          : cOrd.price > 0
+                          ? String(cOrd.price)
+                          : '';
+                      const noteVal =
+                        customNoteDraft[cOrd.id] !== undefined
+                          ? customNoteDraft[cOrd.id]
+                          : cOrd.admin_note;
+                      const linkVal =
+                        customLinkDraft[cOrd.id] !== undefined
+                          ? customLinkDraft[cOrd.id]
+                          : cOrd.delivery_links[0] || '';
+                      const pickedFiles = customFilesDraft[cOrd.id] || [];
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleMessageStatus(msg)}
-                            className={
-                              msg.status === 'BARU'
-                                ? 'px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 bg-[#0F2A1D] text-white'
-                                : 'px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 bg-white border border-[#AEC3B0] text-[#6B9071]'
-                            }
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>
-                              {msg.status === 'BARU'
-                                ? 'Tandai Selesai'
-                                : 'Selesai'}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSupportMessage(msg.id)}
-                            className="p-1.5 rounded-full bg-red-50 text-red-600"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
+                      const cleanWa = cOrd.customer_contact.replace(
+                        /[^0-9]/g,
+                        ''
+                      );
+                      const waUrl = cleanWa
+                        ? `https://wa.me/${
+                            cleanWa.startsWith('0')
+                              ? '62' + cleanWa.slice(1)
+                              : cleanWa
+                          }`
+                        : null;
 
-                      <p className="text-xs text-[#0F2A1D] mb-2 break-all">
-                        <strong>Email:</strong> {msg.sender_email}
-                        {msg.sender_contact && ` • WA: ${msg.sender_contact}`}
-                        {msg.invoice_number &&
-                          ` • Invoice: #${msg.invoice_number}`}
-                      </p>
-
-                      <div className="p-3 rounded-xl bg-white border border-[#AEC3B0]/50 text-xs sm:text-sm text-[#0F2A1D] whitespace-pre-line break-words mb-3">
-                        {msg.message}
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {waLink && (
-                          <a
-                            href={waLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3.5 py-1.5 rounded-full bg-[#375534] text-white text-xs font-bold"
-                          >
-                            Balas via WhatsApp
-                          </a>
-                        )}
-                        <a
-                          href={`mailto:${msg.sender_email}?subject=Balasan%20Admin%20RizzFlow`}
-                          className="px-3.5 py-1.5 rounded-full bg-white border border-[#AEC3B0] text-[#0F2A1D] text-xs font-bold"
+                      return (
+                        <div
+                          key={cOrd.id}
+                          className="p-5 rounded-3xl bg-[#F6F8F3] border-2 border-[#AEC3B0]/70 space-y-4"
                         >
-                          Balas via Email
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#AEC3B0]/50 pb-3">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className="px-3 py-1 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-xs font-extrabold tracking-wider inline-flex items-center gap-1">
+                                <KeyRound className="w-3.5 h-3.5" />
+                                <span>{cOrd.order_code}</span>
+                              </span>
+                              <h3 className="font-extrabold text-sm sm:text-base text-[#0F2A1D]">
+                                {cOrd.project_title}
+                              </h3>
+                            </div>
 
-        {/* ================================================================== */}
-        {/* TAB 3: RIWAYAT PEMBELIAN */}
-        {/* ================================================================== */}
-        {activeTab === 'orders' && (
-          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
-            <h2 className="text-lg font-extrabold text-[#0F2A1D] mb-4">
-              Riwayat Pembelian Pelanggan ({orders.length})
-            </h2>
-            {orders.length === 0 ? (
-              <p className="text-sm text-[#6B9071] text-center py-10">
-                Belum ada riwayat pesanan.
-              </p>
+                            <div className="flex items-center gap-2 self-start sm:self-center">
+                              <span
+                                className={
+                                  cOrd.status === 'LUNAS'
+                                    ? 'px-3 py-1 rounded-full text-[11px] font-extrabold bg-[#0F2A1D] text-[#E3EED4]'
+                                    : cOrd.status === 'SIAP_DIBAYAR'
+                                    ? 'px-3 py-1 rounded-full text-[11px] font-extrabold bg-[#375534] text-white'
+                                    : 'px-3 py-1 rounded-full text-[11px] font-extrabold bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071]'
+                                }
+                              >
+                                {cOrd.status === 'LUNAS'
+                                  ? '✓ LUNAS & TERKIRIM'
+                                  : cOrd.status === 'SIAP_DIBAYAR'
+                                  ? 'TAGIHAN TERKIRIM (MENUNGGU BAYAR)'
+                                  : 'MENUNGGU PENGERJAAN ADMIN'}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCustomOrder(cOrd.id)}
+                                className="p-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100"
+                                title="Hapus Pesanan Kustom"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="text-xs text-[#0F2A1D] space-y-1 break-all">
+                            <p>
+                              <strong>Pemesan:</strong> {cOrd.customer_name} •{' '}
+                              <strong>Email:</strong> {cOrd.customer_email}
+                              {cOrd.customer_contact &&
+                                ` • WA: ${cOrd.customer_contact}`}
+                            </p>
+                            <div className="p-3 rounded-xl bg-white border border-[#AEC3B0]/60 text-xs text-[#375534] whitespace-pre-line mt-1.5">
+                              <strong className="text-[#0F2A1D] block mb-0.5">
+                                Detail Permintaan Pelanggan:
+                              </strong>
+                              {cOrd.request_details}
+                            </div>
+                          </div>
+
+                          {/* Kolom Upload Produk Kustom & Penentuan Harga Tagihan */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                            <div>
+                              <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1">
+                                1. Harga Tagihan Proyek Kustom (Rp) *
+                              </label>
+                              <input
+                                type="number"
+                                min="1000"
+                                value={priceVal}
+                                onChange={(e) =>
+                                  setCustomPriceDraft((prev) => ({
+                                    ...prev,
+                                    [cOrd.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Contoh: 150000"
+                                className="w-full px-3.5 py-2.5 bg-white border border-[#AEC3B0] rounded-xl text-xs sm:text-sm font-bold text-[#0F2A1D]"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1">
+                                2. Link Hasil Pengerjaan (Opsional — GDrive/Web)
+                              </label>
+                              <input
+                                type="url"
+                                value={linkVal}
+                                onChange={(e) =>
+                                  setCustomLinkDraft((prev) => ({
+                                    ...prev,
+                                    [cOrd.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="https://drive.google.com/..."
+                                className="w-full px-3.5 py-2.5 bg-white border border-[#AEC3B0] rounded-xl text-xs sm:text-sm text-[#0F2A1D]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div className="p-3.5 rounded-2xl bg-[#E3EED4]/65 border border-dashed border-[#375534]">
+                              <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1">
+                                3. Upload File Produk Kustom yang Sudah Selesai
+                              </label>
+                              <input
+                                type="file"
+                                multiple
+                                onChange={(e) =>
+                                  setCustomFilesDraft((prev) => ({
+                                    ...prev,
+                                    [cOrd.id]: e.target.files
+                                      ? Array.from(e.target.files)
+                                      : [],
+                                  }))
+                                }
+                                className="text-xs text-[#0F2A1D] w-full mt-1"
+                              />
+                              {pickedFiles.length > 0 ? (
+                                <p className="text-[11px] font-extrabold text-[#375534] mt-1.5">
+                                  ✓ {pickedFiles.length} file baru siap diunggah
+                                </p>
+                              ) : cOrd.file_paths.length > 0 ? (
+                                <p className="text-[11px] font-extrabold text-[#0F2A1D] mt-1.5">
+                                  ✓ {cOrd.file_paths.length} file sudah terunggah
+                                </p>
+                              ) : null}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1">
+                                4. Catatan untuk Pelanggan (Dikirim ke Email):
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={noteVal}
+                                onChange={(e) =>
+                                  setCustomNoteDraft((prev) => ({
+                                    ...prev,
+                                    [cOrd.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Tuliskan pesan bahwa pesanan sudah siap dibayar..."
+                                className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs text-[#0F2A1D]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handleCompleteCustomOrderAndSendBill(cOrd)
+                              }
+                              className="px-5 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-extrabold inline-flex items-center gap-2 shadow-sm transition-colors"
+                            >
+                              {isBusy ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <span>Mengunggah &amp; Mengirim Email...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-4 h-4 text-[#E3EED4]" />
+                                  <span>
+                                    {cOrd.status === 'SIAP_DIBAYAR'
+                                      ? 'Perbarui Produk & Kirim Ulang Tagihan'
+                                      : 'Tandai Produk Selesai & Kirim Tagihan via Email'}
+                                  </span>
+                                </>
+                              )}
+                            </button>
+
+                            {waUrl && (
+                              <a
+                                href={waUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-4 py-2.5 rounded-full bg-white border border-[#AEC3B0] text-[#0F2A1D] text-xs font-bold"
+                              >
+                                Hubungi WA Pemesan
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             ) : (
-              <div className="space-y-3">
-                {orders.map((ord) => (
-                  <div
-                    key={ord.id}
-                    className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-sm text-[#0F2A1D]">
-                          #{ord.invoice_number}
-                        </span>
-                        <span
+              <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow space-y-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-[#0F2A1D]">
+                    Kotak Masuk Klaim Garansi &amp; Pertanyaan ({supportMessages.length})
+                  </h2>
+                  <p className="text-xs text-[#6B9071]">
+                    Kelola laporan klaim garansi dan pesan dari pengunjung toko.
+                  </p>
+                </div>
+
+                {supportMessages.length === 0 ? (
+                  <p className="text-sm text-[#6B9071] text-center py-12">
+                    Belum ada pesan masuk.
+                  </p>
+                ) : (
+                  <div className="space-y-3.5">
+                    {supportMessages.map((msg) => {
+                      const cleanWa = msg.sender_contact.replace(
+                        /[^0-9]/g,
+                        ''
+                      );
+                      const waLink = cleanWa
+                        ? `https://wa.me/${
+                            cleanWa.startsWith('0')
+                              ? '62' + cleanWa.slice(1)
+                              : cleanWa
+                          }`
+                        : null;
+
+                      return (
+                        <div
+                          key={msg.id}
                           className={
-                            ord.payment_status === 'PAID'
-                              ? 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E3EED4] text-[#0F2A1D]'
-                              : 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800'
+                            msg.status === 'BARU'
+                              ? 'p-4 rounded-2xl border min-w-0 bg-[#E3EED4]/45 border-[#6B9071]'
+                              : 'p-4 rounded-2xl border min-w-0 bg-[#F6F8F3] border-[#AEC3B0]/60'
                           }
                         >
-                          {ord.payment_status}
-                        </span>
-                      </div>
-                      <p className="text-xs font-semibold text-[#0F2A1D] break-all">
-                        Email:{' '}
-                        <span className="text-[#375534]">
-                          {ord.customer_email}
-                        </span>
-                      </p>
-                      <div className="text-sm font-extrabold text-[#0F2A1D]">
-                        Total: Rp{ord.final_amount.toLocaleString('id-ID')}
-                      </div>
-                    </div>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071]/50">
+                                {msg.type === 'KLAIM_GARANSI'
+                                  ? '🛡️ Klaim Garansi'
+                                  : msg.type === 'LAYANAN_KHUSUS'
+                                  ? `✨ Pesanan Kustom (${msg.invoice_number})`
+                                  : '💬 Pertanyaan'}
+                              </span>
+                              <span className="font-extrabold text-sm text-[#0F2A1D]">
+                                {msg.sender_name}
+                              </span>
+                            </div>
 
-                    {ord.payment_status === 'PAID' && (
-                      <button
-                        type="button"
-                        onClick={() => handleResendDownloadEmail(ord.id)}
-                        disabled={resendingOrderId === ord.id}
-                        className="px-4 py-2 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0"
-                      >
-                        <Send className="w-3.5 h-3.5 text-[#E3EED4]" />
-                        <span>
-                          {resendingOrderId === ord.id
-                            ? 'Mengirim...'
-                            : 'Kirim Ulang Email'}
-                        </span>
-                      </button>
-                    )}
+                            <div className="flex items-center gap-2 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMessageStatus(msg)}
+                                className={
+                                  msg.status === 'BARU'
+                                    ? 'px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 bg-[#0F2A1D] text-white'
+                                    : 'px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 bg-white border border-[#AEC3B0] text-[#6B9071]'
+                                }
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>
+                                  {msg.status === 'BARU'
+                                    ? 'Tandai Selesai'
+                                    : 'Selesai'}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDeleteSupportMessage(msg.id)
+                                }
+                                className="p-1.5 rounded-full bg-red-50 text-red-600"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-[#0F2A1D] mb-2 break-all">
+                            <strong>Email:</strong> {msg.sender_email}
+                            {msg.sender_contact &&
+                              ` • WA: ${msg.sender_contact}`}
+                            {msg.invoice_number &&
+                              ` • Kode/Invoice: ${msg.invoice_number}`}
+                          </p>
+
+                          <div className="p-3 rounded-xl bg-white border border-[#AEC3B0]/50 text-xs sm:text-sm text-[#0F2A1D] whitespace-pre-line break-words mb-3">
+                            {msg.message}
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {waLink && (
+                              <a
+                                href={waLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3.5 py-1.5 rounded-full bg-[#375534] text-white text-xs font-bold"
+                              >
+                                Balas via WhatsApp
+                              </a>
+                            )}
+                            <a
+                              href={`mailto:${msg.sender_email}?subject=Balasan%20Admin%20RizzFlow`}
+                              className="px-3.5 py-1.5 rounded-full bg-white border border-[#AEC3B0] text-[#0F2A1D] text-xs font-bold"
+                            >
+                              Balas via Email
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
         )}
 
         {/* ================================================================== */}
-        {/* TAB 4: KATEGORI */}
-        {/* ================================================================== */}
-        {activeTab === 'categories' && (
-          <div className="space-y-6">
-            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
-              <h2 className="text-lg font-extrabold text-[#0F2A1D] mb-4">
-                Tambah Kategori Produk
-              </h2>
-              <form onSubmit={handleCreateCategory} className="flex gap-3">
-                <input
-                  type="text"
-                  required
-                  value={catName}
-                  onChange={(e) => setCatName(e.target.value)}
-                  placeholder="Contoh: E-Book / Template Excel"
-                  className="flex-1 min-w-0 px-4 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-full text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={isSavingCategory}
-                  className="px-5 py-2.5 rounded-full bg-[#0F2A1D] text-white font-bold text-xs sm:text-sm inline-flex items-center gap-1.5 shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Tambah</span>
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
-              <h3 className="text-base font-extrabold text-[#0F2A1D] mb-4">
-                Daftar Kategori ({categories.length})
-              </h3>
-              <div className="space-y-2.5">
-                {categories.map((cat) => (
-                  <div
-                    key={cat.id}
-                    className="flex items-center justify-between gap-2 p-3.5 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/50"
-                  >
-                    <span className="font-bold text-sm text-[#0F2A1D]">
-                      {cat.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      className="p-2 rounded-full text-red-600 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ================================================================== */}
-        {/* TAB 5: KODE PROMO */}
+        {/* HALAMAN 4: KODE PROMO */}
         {/* ================================================================== */}
         {activeTab === 'promos' && (
           <div className="space-y-6">
             <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
               <h2 className="text-lg font-extrabold text-[#0F2A1D] mb-4">
-                Buat Kode Promo Baru
+                Buat Kode Promo Diskon Baru
               </h2>
               <form onSubmit={handleCreatePromo} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1916,7 +2555,7 @@ export default function AdminDashboardPage() {
         )}
 
         {/* ================================================================== */}
-        {/* TAB 6: PENGATURAN TOKO & LAYANAN KUSTOM */}
+        {/* HALAMAN 5: PENGATURAN TOKO, LAYANAN KUSTOM, & NOTIFIKASI TELEGRAM */}
         {/* ================================================================== */}
         {activeTab === 'settings' && (
           <div className="space-y-8">
@@ -1924,21 +2563,65 @@ export default function AdminDashboardPage() {
               <div className="flex items-center gap-2 mb-1">
                 <Sparkles className="w-5 h-5 text-[#375534]" />
                 <h2 className="text-lg font-extrabold text-[#0F2A1D]">
-                  Pengaturan Layanan Kustom &amp; Kontak Admin
+                  Pengaturan Layanan Kustom, Kontak &amp; Notifikasi Bot Telegram
                 </h2>
               </div>
               <p className="text-xs text-[#6B9071] mb-5">
-                Atur judul, deskripsi, daftar layanan kustom, serta nomor WhatsApp dan username Telegram Admin untuk konsultasi pelanggan.
+                Atur layanan kustom yang tampil di toko serta masukkan Bot Token &amp; Chat ID Telegram kamu agar setiap ada pembelian atau pesan masuk langsung dikirim ke Telegrammu.
               </p>
 
               <form
                 onSubmit={handleSaveCustomServiceConfig}
                 className="space-y-4"
               >
+                {/* Kotak Konfigurasi Notifikasi Bot Telegram Admin */}
+                <div className="p-4 rounded-2xl bg-[#E3EED4]/65 border border-[#6B9071] space-y-3">
+                  <div className="text-xs font-extrabold text-[#0F2A1D]">
+                    🔔 Notifikasi Otomatis ke Telegram Pribadimu (Saat Ada Pembelian / Pesan Baru)
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
+                        Telegram Bot Token (Dari @BotFather)
+                      </label>
+                      <input
+                        type="text"
+                        value={customService.telegram_bot_token || ''}
+                        onChange={(e) =>
+                          setCustomService({
+                            ...customService,
+                            telegram_bot_token: e.target.value,
+                          })
+                        }
+                        placeholder="Contoh: 7123456789:AAHxyz..."
+                        className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
+                        Telegram Chat ID Kamu (Dari @userinfobot)
+                      </label>
+                      <input
+                        type="text"
+                        value={customService.telegram_chat_id || ''}
+                        onChange={(e) =>
+                          setCustomService({
+                            ...customService,
+                            telegram_chat_id: e.target.value,
+                          })
+                        }
+                        placeholder="Contoh: 123456789"
+                        className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      Nomor WhatsApp Admin (Opsional)
+                      Nomor WhatsApp Admin (Untuk Tombol Konsultasi)
                     </label>
                     <input
                       type="text"
@@ -1956,7 +2639,7 @@ export default function AdminDashboardPage() {
 
                   <div>
                     <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                      Username Telegram Admin (Opsional)
+                      Username / Link Telegram Admin (Opsional)
                     </label>
                     <input
                       type="text"
@@ -1967,7 +2650,7 @@ export default function AdminDashboardPage() {
                           admin_telegram: e.target.value,
                         })
                       }
-                      placeholder="Contoh: @rizzflow_admin"
+                      placeholder="Contoh: @username_kamu"
                       className="w-full px-3.5 py-2.5 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-xl text-sm"
                     />
                   </div>
@@ -1975,7 +2658,7 @@ export default function AdminDashboardPage() {
 
                 <div>
                   <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                    Judul Layanan Kustom *
+                    Judul Etalase Layanan Kustom *
                   </label>
                   <input
                     type="text"
@@ -2012,7 +2695,7 @@ export default function AdminDashboardPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-bold text-[#0F2A1D]">
-                      Daftar Layanan yang Tersedia *
+                      Daftar Layanan Kustom yang Tersedia *
                     </label>
                     <button
                       type="button"
@@ -2052,18 +2735,18 @@ export default function AdminDashboardPage() {
                 <button
                   type="submit"
                   disabled={isSavingCustomService}
-                  className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-bold text-xs sm:text-sm"
+                  className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-extrabold text-xs sm:text-sm"
                 >
                   {isSavingCustomService
                     ? 'Menyimpan...'
-                    : 'Simpan Pengaturan Layanan Kustom'}
+                    : 'Simpan Layanan Kustom & Notifikasi Telegram'}
                 </button>
               </form>
             </div>
 
             <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow">
               <h2 className="text-lg font-extrabold text-[#0F2A1D] mb-1">
-                Pengaturan Identitas Toko
+                Pengaturan Identitas Utama Toko
               </h2>
               <form onSubmit={handleSaveSettings} className="space-y-4 mt-4">
                 <div>
@@ -2101,7 +2784,7 @@ export default function AdminDashboardPage() {
 
                 <div>
                   <label className="block text-xs font-bold text-[#0F2A1D] mb-1">
-                    Kontak Bantuan (Email / WhatsApp)
+                    Kontak Bantuan Utama (Email / WhatsApp)
                   </label>
                   <input
                     type="text"
@@ -2120,11 +2803,11 @@ export default function AdminDashboardPage() {
                 <button
                   type="submit"
                   disabled={isSavingSettings}
-                  className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-bold text-xs sm:text-sm"
+                  className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-extrabold text-xs sm:text-sm"
                 >
                   {isSavingSettings
                     ? 'Menyimpan...'
-                    : 'Simpan Pengaturan Toko'}
+                    : 'Simpan Identitas Toko'}
                 </button>
               </form>
             </div>

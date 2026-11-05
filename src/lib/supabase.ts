@@ -3,14 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-/**
- * Koneksi Supabase untuk sisi Browser/Client (Katalog Publik & Login Admin).
- */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-/**
- * Koneksi Supabase khusus sisi Server menggunakan Service Role Key.
- */
 export function getSupabaseAdmin() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {
@@ -25,13 +19,9 @@ export function getSupabaseAdmin() {
   });
 }
 
-/**
- * Membuat tautan unduhan sementara (Signed URL) dari bucket privat 'digital-products'.
- * Berlaku selama 7 hari (604.800 detik).
- */
 export async function generateProductSignedUrl(filePath: string): Promise<string> {
   const supabaseAdmin = getSupabaseAdmin();
-  const expiresInSeconds = 60 * 60 * 24 * 7; // 7 Hari
+  const expiresInSeconds = 60 * 60 * 24 * 7; // Berlaku 7 Hari
 
   const { data, error } = await supabaseAdmin.storage
     .from('digital-products')
@@ -48,9 +38,6 @@ export async function generateProductSignedUrl(filePath: string): Promise<string
   return data.signedUrl;
 }
 
-/**
- * Membaca daftar URL gambar thumbnail (mendukung 1 gambar maupun banyak gambar).
- */
 export function parseThumbnails(rawThumbnailUrl: string): string[] {
   if (!rawThumbnailUrl) return [];
   const trimmed = rawThumbnailUrl.trim();
@@ -71,28 +58,15 @@ export function parseThumbnails(rawThumbnailUrl: string): string[] {
   return [trimmed];
 }
 
-export type ProductSaleType = 'INSTAN' | 'LANGGANAN';
-
 export interface ProductDeliverables {
   files: string[];
   links: string[];
   original_price?: number | null;
-  product_type?: ProductSaleType;
-  subscription_duration?: string | null;
 }
 
-/**
- * Membaca isi file_path produk (mendukung multi-file, link Drive, Harga Coret, & Tipe Produk Langganan).
- */
 export function parseProductDeliverables(rawFilePath: string): ProductDeliverables {
   if (!rawFilePath) {
-    return {
-      files: [],
-      links: [],
-      original_price: null,
-      product_type: 'INSTAN',
-      subscription_duration: null,
-    };
+    return { files: [], links: [], original_price: null };
   }
   const trimmed = rawFilePath.trim();
 
@@ -102,8 +76,6 @@ export function parseProductDeliverables(rawFilePath: string): ProductDeliverabl
         files?: unknown;
         links?: unknown;
         original_price?: unknown;
-        product_type?: unknown;
-        subscription_duration?: unknown;
       };
       const files = Array.isArray(parsed.files)
         ? parsed.files.filter(
@@ -119,49 +91,18 @@ export function parseProductDeliverables(rawFilePath: string): ProductDeliverabl
         typeof parsed.original_price === 'number' && parsed.original_price > 0
           ? parsed.original_price
           : null;
-      const product_type: ProductSaleType =
-        parsed.product_type === 'LANGGANAN' ? 'LANGGANAN' : 'INSTAN';
-      const subscription_duration =
-        typeof parsed.subscription_duration === 'string' &&
-        parsed.subscription_duration.trim().length > 0
-          ? parsed.subscription_duration.trim()
-          : null;
 
-      return {
-        files,
-        links,
-        original_price,
-        product_type,
-        subscription_duration,
-      };
+      return { files, links, original_price };
     } catch {
-      return {
-        files: [trimmed],
-        links: [],
-        original_price: null,
-        product_type: 'INSTAN',
-        subscription_duration: null,
-      };
+      return { files: [trimmed], links: [], original_price: null };
     }
   }
 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return {
-      files: [],
-      links: [trimmed],
-      original_price: null,
-      product_type: 'INSTAN',
-      subscription_duration: null,
-    };
+    return { files: [], links: [trimmed], original_price: null };
   }
 
-  return {
-    files: [trimmed],
-    links: [],
-    original_price: null,
-    product_type: 'INSTAN',
-    subscription_duration: null,
-  };
+  return { files: [trimmed], links: [], original_price: null };
 }
 
 export interface DeliveryLinkItem {
@@ -170,9 +111,6 @@ export interface DeliveryLinkItem {
   signedDownloadUrl: string;
 }
 
-/**
- * Menghasilkan daftar tombol tautan unduhan untuk dikirimkan ke email pembeli.
- */
 export async function buildProductDeliveryItems(params: {
   productTitle: string;
   quantity: number;
@@ -213,7 +151,7 @@ export async function buildProductDeliveryItems(params: {
 }
 
 // ============================================================================
-// PENYIMPANAN PESAN, LAYANAN KUSTOM, & ANTRIAN LANGGANAN 4 ANGKA
+// PENYIMPANAN PESAN, KONFIGURASI LAYANAN KUSTOM, & TRANSAKSI PROYEK KUSTOM
 // ============================================================================
 
 export interface CustomerSupportMessage {
@@ -234,6 +172,8 @@ export interface CustomServiceConfig {
   services: string[];
   admin_whatsapp?: string;
   admin_telegram?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
 }
 
 export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
@@ -248,48 +188,48 @@ export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
   ],
   admin_whatsapp: '',
   admin_telegram: '',
+  telegram_bot_token: '',
+  telegram_chat_id: '',
 };
 
-export type SubscriptionOrderStatus =
-  | 'MENUNGGU_ADMIN'
-  | 'STOK_TERSEDIA'
-  | 'DIPROSES'
+export type CustomOrderStatus =
+  | 'MENUNGGU_PENGERJAAN'
+  | 'SIAP_DIBAYAR'
+  | 'LUNAS'
   | 'DIBATALKAN';
 
-export interface SubscriptionOrder {
+export interface CustomProjectOrder {
   id: string;
-  code: string;
-  product_id: string;
-  product_title: string;
-  product_price: number;
-  product_thumbnail: string;
+  order_code: string; // Contoh: KST-4829
   customer_name: string;
   customer_email: string;
   customer_contact: string;
-  status: SubscriptionOrderStatus;
+  project_title: string;
+  request_details: string;
+  price: number; // Diisi Admin saat produk selesai
   admin_note: string;
-  delivered_account: string;
+  file_paths: string[]; // File yang diunggah Admin
+  delivery_links: string[]; // Link hasil pengerjaan dari Admin
+  status: CustomOrderStatus;
+  payment_status: 'UNPAID' | 'PENDING' | 'PAID';
   qris_string: string | null;
   invoice_number: string | null;
-  payment_status: 'UNPAID' | 'PENDING' | 'PAID';
   created_at: string;
-  expires_wait_at: string;
   updated_at: string;
 }
 
 const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
 const CUSTOM_SERVICES_STORAGE_FILE = '__rizzflow_custom_services.json';
-const SUBSCRIPTIONS_STORAGE_FILE = '__rizzflow_subscription_orders.json';
+const CUSTOM_ORDERS_STORAGE_FILE = '__rizzflow_custom_project_orders.json';
 
 export async function getStoredCustomerMessages(): Promise<CustomerSupportMessage[]> {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin.storage
-    .from('digital-products')
-    .download(MESSAGES_STORAGE_FILE);
-
-  if (error || !data) return [];
-
   try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin.storage
+      .from('digital-products')
+      .download(MESSAGES_STORAGE_FILE);
+
+    if (error || !data) return [];
     const text = await data.text();
     const parsed = JSON.parse(text) as unknown;
     return Array.isArray(parsed) ? (parsed as CustomerSupportMessage[]) : [];
@@ -319,9 +259,7 @@ export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfi
       .from('digital-products')
       .download(CUSTOM_SERVICES_STORAGE_FILE);
 
-    if (error || !data) {
-      return DEFAULT_CUSTOM_SERVICE_CONFIG;
-    }
+    if (error || !data) return DEFAULT_CUSTOM_SERVICE_CONFIG;
 
     const text = await data.text();
     const parsed = JSON.parse(text) as Partial<CustomServiceConfig>;
@@ -335,6 +273,8 @@ export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfi
           : DEFAULT_CUSTOM_SERVICE_CONFIG.services,
       admin_whatsapp: parsed.admin_whatsapp || '',
       admin_telegram: parsed.admin_telegram || '',
+      telegram_bot_token: parsed.telegram_bot_token || '',
+      telegram_chat_id: parsed.telegram_chat_id || '',
     };
   } catch {
     return DEFAULT_CUSTOM_SERVICE_CONFIG;
@@ -355,33 +295,66 @@ export async function saveStoredCustomServiceConfig(
     });
 }
 
-export async function getStoredSubscriptionOrders(): Promise<SubscriptionOrder[]> {
+export async function getStoredCustomProjectOrders(): Promise<CustomProjectOrder[]> {
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.storage
       .from('digital-products')
-      .download(SUBSCRIPTIONS_STORAGE_FILE);
+      .download(CUSTOM_ORDERS_STORAGE_FILE);
 
     if (error || !data) return [];
-
     const text = await data.text();
     const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? (parsed as SubscriptionOrder[]) : [];
+    return Array.isArray(parsed) ? (parsed as CustomProjectOrder[]) : [];
   } catch {
     return [];
   }
 }
 
-export async function saveStoredSubscriptionOrders(
-  orders: SubscriptionOrder[]
+export async function saveStoredCustomProjectOrders(
+  orders: CustomProjectOrder[]
 ): Promise<void> {
   const supabaseAdmin = getSupabaseAdmin();
   const payload = JSON.stringify(orders, null, 2);
 
   await supabaseAdmin.storage
     .from('digital-products')
-    .upload(SUBSCRIPTIONS_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
+    .upload(CUSTOM_ORDERS_STORAGE_FILE, Buffer.from(payload, 'utf-8'), {
       contentType: 'application/json',
       upsert: true,
     });
+}
+
+/**
+ * Mengirimkan notifikasi instan ke Telegram Admin.
+ * Mengambil token dari pengaturan Admin atau dari environment variables Vercel.
+ */
+export async function sendAdminTelegramNotification(messageText: string): Promise<void> {
+  try {
+    const cfg = await getStoredCustomServiceConfig();
+    const botToken = (
+      cfg.telegram_bot_token ||
+      process.env.TELEGRAM_BOT_TOKEN ||
+      ''
+    ).trim();
+    const chatId = (
+      cfg.telegram_chat_id ||
+      process.env.TELEGRAM_CHAT_ID ||
+      ''
+    ).trim();
+
+    if (!botToken || !chatId) return;
+
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: messageText,
+        parse_mode: 'Markdown',
+      }),
+    });
+  } catch (e) {
+    console.error('Gagal mengirim notifikasi Telegram:', e);
+  }
 }

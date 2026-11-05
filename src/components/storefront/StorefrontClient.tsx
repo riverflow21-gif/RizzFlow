@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,10 +12,7 @@ import {
   Trash2,
   X,
   ArrowRight,
-  Check,
   Store,
-  Heart,
-  Images,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Category, Product, CartItem, StoreSettings } from '@/types';
@@ -25,9 +22,8 @@ import {
   CustomServiceConfig,
   DEFAULT_CUSTOM_SERVICE_CONFIG,
   CART_STORAGE_KEY,
-  FAVORITES_STORAGE_KEY,
+  LOGO_PATH,
   parseThumbnails,
-  getProductCardInfo,
   formatRupiah,
 } from './StorefrontTypes';
 import HomeTabView from './HomeTabView';
@@ -56,7 +52,6 @@ export default function StorefrontClient({
 }: StorefrontClientProps) {
   const router = useRouter();
 
-  // State Data Utama
   const [products, setProducts] = useState(initialProducts as Product[]);
   const [categories, setCategories] = useState(
     initialCategories as Category[]
@@ -66,28 +61,26 @@ export default function StorefrontClient({
     DEFAULT_CUSTOM_SERVICE_CONFIG as CustomServiceConfig
   );
 
-  // State Navigasi Multi-Halaman (Home | Shop | Favorit | Layanan)
+  // Navigasi 3 Halaman Bersih: Home | Katalog | Layanan
   const [activeTab, setActiveTab] = useState('home' as StorefrontTab);
 
-  // State Filter Halaman Shop
+  // Filter Katalog
   const [shopFilterMode, setShopFilterMode] = useState(
     'ALL' as ShopFilterMode
   );
   const [selectedCategoryId, setSelectedCategoryId] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // State Detail Produk, Keranjang Belanja, & Daftar Favorit
+  // Detail Produk & Keranjang Belanja
   const [activeProduct, setActiveProduct] = useState(
     null as NullableProduct
   );
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cart, setCart] = useState([] as CartItem[]);
-  const [favoriteIds, setFavoriteIds] = useState([] as string[]);
   const [addedProductId, setAddedProductId] = useState(
     null as NullableString
   );
 
-  // Segarkan data dari Supabase & ambil konfigurasi Layanan Kustom
   useEffect(() => {
     const refreshData = async () => {
       const [prodRes, catRes, setRes] = await Promise.all([
@@ -118,14 +111,13 @@ export default function StorefrontClient({
           }
         }
       } catch {
-        // Gunakan konfigurasi default jika gagal memuat
+        // Gunakan konfigurasi default
       }
     };
 
     refreshData();
   }, []);
 
-  // Muat keranjang & daftar favorit dari localStorage saat pertama kali dibuka
   useEffect(() => {
     try {
       const savedCart = localStorage.getItem(CART_STORAGE_KEY);
@@ -133,14 +125,8 @@ export default function StorefrontClient({
         const parsedCart = JSON.parse(savedCart) as CartItem[];
         if (Array.isArray(parsedCart)) setCart(parsedCart);
       }
-
-      const savedFavs = localStorage.getItem(FAVORITES_STORAGE_KEY);
-      if (savedFavs) {
-        const parsedFavs = JSON.parse(savedFavs) as string[];
-        if (Array.isArray(parsedFavs)) setFavoriteIds(parsedFavs);
-      }
     } catch (e) {
-      console.error('Gagal memuat data localStorage:', e);
+      console.error('Gagal memuat keranjang:', e);
     }
   }, []);
 
@@ -153,22 +139,6 @@ export default function StorefrontClient({
     }
   };
 
-  const handleToggleFavorite = (productId: string) => {
-    setFavoriteIds((prev) => {
-      const exists = prev.includes(productId);
-      const updated = exists
-        ? prev.filter((id) => id !== productId)
-        : [...prev, productId];
-      try {
-        localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(updated));
-      } catch {
-        // Abaikan jika storage penuh
-      }
-      return updated;
-    });
-  };
-
-  // Penanganan Tombol Back Bawaan HP & Kunci Scroll Layar Belakang
   const isAnyOverlayOpen = Boolean(activeProduct || isCartOpen);
 
   useEffect(() => {
@@ -228,7 +198,6 @@ export default function StorefrontClient({
     handleNavigateTab('shop');
   };
 
-  // Fungsi Tambah Produk ke Keranjang
   const handleAddProductWithQuantity = (product: Product, qty: number) => {
     const primaryThumb =
       parseThumbnails(product.thumbnail_url)[0] || product.thumbnail_url;
@@ -285,11 +254,6 @@ export default function StorefrontClient({
     return rawTg.startsWith('http') ? rawTg : `https://t.me/${rawTg}`;
   };
 
-  const favoriteProducts = useMemo(
-    () => products.filter((p) => favoriteIds.includes(p.id)),
-    [products, favoriteIds]
-  );
-
   const totalCartItems = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalCartPrice = cart.reduce(
     (acc, item) => acc + item.product.price * item.quantity,
@@ -298,8 +262,7 @@ export default function StorefrontClient({
 
   const navItems: NavBarItem[] = [
     { id: 'home', label: 'Home' },
-    { id: 'shop', label: 'Shop' },
-    { id: 'favorites', label: 'Favorit' },
+    { id: 'shop', label: 'Katalog' },
     { id: 'services', label: 'Layanan' },
   ];
 
@@ -309,14 +272,19 @@ export default function StorefrontClient({
       : 'w-4 h-4 stroke-[2] shrink-0';
     if (id === 'home') return <Home className={cls} />;
     if (id === 'shop') return <Store className={cls} />;
-    if (id === 'favorites') return <Heart className={cls} />;
     return <Sparkles className={cls} />;
   };
 
   return (
-    <div className="min-h-screen bg-[#F6F8F3] text-[#0F2A1D] flex flex-col pb-24 md:pb-8">
+    <div
+      className={
+        totalCartItems > 0
+          ? 'min-h-screen bg-[#F6F8F3] text-[#0F2A1D] flex flex-col pb-40 md:pb-24'
+          : 'min-h-screen bg-[#F6F8F3] text-[#0F2A1D] flex flex-col pb-24 md:pb-8'
+      }
+    >
       {/* ==================================================================== */}
-      {/* TOP BAR STICKY (Tampil di Desktop untuk Semua Tab, & di HP selain Home) */}
+      {/* TOP BAR STICKY (Tanpa Tombol Keranjang di Pojok Atas) */}
       {/* ==================================================================== */}
       <header
         className={
@@ -332,9 +300,9 @@ export default function StorefrontClient({
             className="flex items-center gap-2.5 min-w-0 text-left"
           >
             <img
-              src="/logo.jpg"
+              src={LOGO_PATH}
               alt={settings.store_name}
-              className="h-9 w-9 rounded-xl object-cover border border-[#AEC3B0]/60 shrink-0"
+              className="h-9 w-9 rounded-xl object-contain bg-white p-0.5 border border-[#AEC3B0]/60 shrink-0"
             />
             <span className="font-extrabold text-base sm:text-lg text-[#0F2A1D] truncate">
               {settings.store_name}
@@ -352,45 +320,25 @@ export default function StorefrontClient({
                   onClick={() => handleNavigateTab(item.id)}
                   className={
                     isActive
-                      ? 'px-4 py-1.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] font-extrabold text-xs inline-flex items-center gap-1.5 transition-all'
-                      : 'px-4 py-1.5 rounded-full text-[#6B9071] hover:text-[#0F2A1D] font-bold text-xs inline-flex items-center gap-1.5 transition-all'
+                      ? 'px-5 py-1.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] font-extrabold text-xs inline-flex items-center gap-1.5 transition-all'
+                      : 'px-5 py-1.5 rounded-full text-[#6B9071] hover:text-[#0F2A1D] font-bold text-xs inline-flex items-center gap-1.5 transition-all'
                   }
                 >
                   {renderNavIcon(item.id, isActive)}
                   <span>{item.label}</span>
-                  {item.id === 'favorites' && favoriteIds.length > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full bg-[#375534] text-white text-[10px] font-extrabold">
-                      {favoriteIds.length}
-                    </span>
-                  )}
                 </button>
               );
             })}
           </nav>
 
-          {/* Tombol Keranjang Belanja di Kanan Atas */}
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.92 }}
-            onClick={() => setIsCartOpen(true)}
-            className="relative inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/60 rf-card-shadow transition-colors shrink-0"
-            aria-label="Keranjang Belanja"
-          >
-            <ShoppingBag className="w-4 h-4 text-[#375534]" />
-            <span className="text-xs font-extrabold hidden sm:inline">
-              Keranjang
-            </span>
-            {totalCartItems > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-[10px] font-extrabold">
-                {totalCartItems}
-              </span>
-            )}
-          </motion.button>
+          <div className="text-[11px] font-bold text-[#6B9071] hidden sm:block">
+            Official Store
+          </div>
         </div>
       </header>
 
       {/* ==================================================================== */}
-      {/* AREA KONTEN 4 HALAMAN (HOME | SHOP | FAVORIT | LAYANAN) */}
+      {/* AREA KONTEN 3 HALAMAN (HOME | KATALOG | LAYANAN) */}
       {/* ==================================================================== */}
       <main className="flex-1 w-full">
         <AnimatePresence mode="wait">
@@ -407,13 +355,9 @@ export default function StorefrontClient({
                 categories={categories}
                 settings={settings}
                 customService={customService}
-                totalCartItems={totalCartItems}
-                favoriteIds={favoriteIds}
                 addedProductId={addedProductId}
-                onOpenCart={() => setIsCartOpen(true)}
                 onSelectProduct={(p) => setActiveProduct(p)}
                 onAddToCart={(p) => handleAddProductWithQuantity(p, 1)}
-                onToggleFavorite={handleToggleFavorite}
                 onNavigateTab={handleNavigateTab}
                 onJumpToShopWithFilter={handleJumpToShopWithFilter}
               />
@@ -437,157 +381,10 @@ export default function StorefrontClient({
                 onChangeCategoryId={setSelectedCategoryId}
                 searchQuery={searchQuery}
                 onChangeSearchQuery={setSearchQuery}
-                favoriteIds={favoriteIds}
                 addedProductId={addedProductId}
                 onSelectProduct={(p) => setActiveProduct(p)}
                 onAddToCart={(p) => handleAddProductWithQuantity(p, 1)}
-                onToggleFavorite={handleToggleFavorite}
               />
-            </motion.div>
-          )}
-
-          {activeTab === 'favorites' && (
-            <motion.div
-              key="tab-favorites"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="max-w-5xl mx-auto px-4 pt-5 pb-12 space-y-5"
-            >
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F2A1D] tracking-tight">
-                  Produk Favoritku
-                </h1>
-                <p className="text-xs text-[#6B9071]">
-                  Daftar produk yang kamu tandai untuk dibeli nanti ({favoriteProducts.length} produk)
-                </p>
-              </div>
-
-              {favoriteProducts.length === 0 ? (
-                <div className="bg-white rounded-[28px] border border-[#AEC3B0]/50 p-10 text-center rf-card-shadow space-y-4">
-                  <div className="w-14 h-14 rounded-full bg-[#E3EED4] text-[#375534] flex items-center justify-center mx-auto">
-                    <Heart className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h2 className="font-extrabold text-base text-[#0F2A1D]">
-                      Belum Ada Produk Favorit
-                    </h2>
-                    <p className="text-xs text-[#6B9071] max-w-sm mx-auto">
-                      Ketuk ikon hati di pojok kanan atas foto produk pada katalog untuk menyimpannya ke halaman ini.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleNavigateTab('shop')}
-                    className="px-6 py-3 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-extrabold transition-colors"
-                  >
-                    Jelajahi Katalog Produk
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-5">
-                  {favoriteProducts.map((product) => {
-                    const info = getProductCardInfo(product);
-                    const isAdded = addedProductId === product.id;
-
-                    return (
-                      <motion.div
-                        key={product.id}
-                        whileHover={{ y: -3 }}
-                        className="bg-white rounded-[24px] p-2.5 sm:p-3 border border-[#AEC3B0]/35 rf-card-shadow flex flex-col justify-between group"
-                      >
-                        <div>
-                          <div
-                            onClick={() => setActiveProduct(product)}
-                            className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3 cursor-pointer"
-                          >
-                            <img
-                              src={info.coverThumb}
-                              alt={product.title}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-
-                            {info.hasDiscount && info.savePercent > 0 ? (
-                              <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white">
-                                Hemat {info.savePercent}%
-                              </span>
-                            ) : product.badge ? (
-                              <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4]/95 text-[#0F2A1D] border border-[#AEC3B0]/60">
-                                {product.badge}
-                              </span>
-                            ) : null}
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleFavorite(product.id);
-                              }}
-                              className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#0F2A1D] flex items-center justify-center shadow-xs"
-                              aria-label="Hapus dari Favorit"
-                            >
-                              <Heart className="w-4 h-4 fill-[#375534] text-[#375534]" />
-                            </button>
-
-                            {info.thumbList.length > 1 && (
-                              <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0F2A1D]/75 text-white inline-flex items-center gap-1">
-                                <Images className="w-3 h-3" />
-                                <span>{info.thumbList.length}</span>
-                              </span>
-                            )}
-                          </div>
-
-                          <div
-                            onClick={() => setActiveProduct(product)}
-                            className="px-1 cursor-pointer"
-                          >
-                            <h3 className="font-extrabold text-xs sm:text-sm text-[#0F2A1D] line-clamp-2 leading-snug mb-1 group-hover:text-[#375534] transition-colors">
-                              {product.title}
-                            </h3>
-                            <p className="text-[11px] text-[#6B9071] line-clamp-1 mb-2">
-                              {product.description}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="px-1 pt-1 flex items-end justify-between gap-2">
-                          <div className="min-w-0">
-                            {info.hasDiscount && info.origPrice && (
-                              <span className="block text-[10px] text-[#6B9071] line-through truncate">
-                                {formatRupiah(info.origPrice)}
-                              </span>
-                            )}
-                            <span className="block font-extrabold text-sm sm:text-base text-[#0F2A1D] truncate">
-                              {formatRupiah(product.price)}
-                            </span>
-                          </div>
-
-                          <motion.button
-                            type="button"
-                            whileTap={{ scale: 0.88 }}
-                            onClick={() =>
-                              handleAddProductWithQuantity(product, 1)
-                            }
-                            className={
-                              isAdded
-                                ? 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#375534] text-white flex items-center justify-center shrink-0 shadow-sm'
-                                : 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] flex items-center justify-center shrink-0 shadow-sm transition-colors'
-                            }
-                            title="Tambah ke Keranjang"
-                          >
-                            {isAdded ? (
-                              <Check className="w-4 h-4 stroke-[2.5]" />
-                            ) : (
-                              <Plus className="w-4 h-4 stroke-[2.5]" />
-                            )}
-                          </motion.button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
             </motion.div>
           )}
 
@@ -628,10 +425,55 @@ export default function StorefrontClient({
       </footer>
 
       {/* ==================================================================== */}
-      {/* FLOATING BOTTOM NAVIGATION BAR (HOME | SHOP | FAVORIT | LAYANAN) */}
+      {/* KERANJANG MENGAPUNG DI BAWAH LAYAR (Hanya Muncul Saat Ada Produk) */}
+      {/* ==================================================================== */}
+      <AnimatePresence>
+        {totalCartItems > 0 && (
+          <motion.div
+            initial={{ y: 70, opacity: 0, scale: 0.95 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 70, opacity: 0, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+            className="fixed bottom-[76px] md:bottom-6 inset-x-4 z-30 flex justify-center pointer-events-none"
+          >
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setIsCartOpen(true)}
+              className="w-full max-w-md py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] border-2 border-[#6B9071] rf-bottom-bar-shadow flex items-center justify-between gap-3 pointer-events-auto transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-8 h-8 rounded-full bg-[#E3EED4] text-[#0F2A1D] font-extrabold text-xs flex items-center justify-center shrink-0">
+                  {totalCartItems}
+                </span>
+                <div className="text-left min-w-0">
+                  <span className="block text-xs font-extrabold text-white truncate">
+                    Keranjang Belanja
+                  </span>
+                  <span className="block text-[10px] text-[#AEC3B0] truncate">
+                    Ketuk untuk periksa &amp; lanjut bayar
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-extrabold text-sm text-[#E3EED4]">
+                  {formatRupiah(totalCartPrice)}
+                </span>
+                <span className="w-7 h-7 rounded-full bg-[#375534] text-white flex items-center justify-center">
+                  <ArrowRight className="w-4 h-4" />
+                </span>
+              </div>
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================================================================== */}
+      {/* FLOATING BOTTOM NAVIGATION BAR (HOME | KATALOG | LAYANAN) */}
       {/* ==================================================================== */}
       <div className="fixed bottom-4 inset-x-4 z-30 md:hidden flex justify-center pointer-events-none">
-        <nav className="bg-white/95 backdrop-blur-md border border-[#AEC3B0]/60 rounded-full p-1.5 rf-bottom-bar-shadow flex items-center justify-between gap-1 w-full max-w-sm pointer-events-auto">
+        <nav className="bg-white/95 backdrop-blur-md border border-[#AEC3B0]/60 rounded-full p-1.5 rf-bottom-bar-shadow flex items-center justify-between gap-1.5 w-full max-w-sm pointer-events-auto">
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
 
@@ -644,13 +486,11 @@ export default function StorefrontClient({
                 className={
                   isActive
                     ? 'flex-1 py-2.5 px-3 rounded-full bg-[#E3EED4] text-[#0F2A1D] font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-all'
-                    : 'flex-1 py-2.5 px-2 rounded-full text-[#6B9071] hover:text-[#0F2A1D] font-bold text-xs flex items-center justify-center gap-1 transition-all'
+                    : 'flex-1 py-2.5 px-3 rounded-full text-[#6B9071] hover:text-[#0F2A1D] font-bold text-xs flex items-center justify-center gap-1.5 transition-all'
                 }
               >
                 {renderNavIcon(item.id, isActive)}
-                <span className={isActive ? 'inline' : 'hidden xs:inline'}>
-                  {item.label}
-                </span>
+                <span>{item.label}</span>
               </motion.button>
             );
           })}
@@ -663,15 +503,10 @@ export default function StorefrontClient({
       <ProductDetailSheet
         product={activeProduct}
         storeName={settings.store_name}
-        isFavorite={
-          activeProduct ? favoriteIds.includes(activeProduct.id) : false
-        }
-        onToggleFavorite={handleToggleFavorite}
         onClose={closeOverlayCleanly}
         onAddWithQuantity={(prod, qty) => {
           handleAddProductWithQuantity(prod, qty);
           setActiveProduct(null);
-          setIsCartOpen(true);
         }}
       />
 
@@ -721,9 +556,6 @@ export default function StorefrontClient({
                     </div>
                     <p className="font-extrabold text-sm text-[#0F2A1D] mb-1">
                       Keranjang masih kosong
-                    </p>
-                    <p className="text-xs text-[#6B9071]">
-                      Pilih produk digital instan dari katalog untuk mulai berbelanja.
                     </p>
                   </div>
                 ) : (

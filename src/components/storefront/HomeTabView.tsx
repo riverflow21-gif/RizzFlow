@@ -4,16 +4,16 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Search,
-  ShoppingBag,
   Plus,
   Check,
   ArrowUpRight,
   ChevronRight,
   Sparkles,
   Images,
-  Heart,
-  Store,
-  Tag,
+  Zap,
+  QrCode,
+  ShieldCheck,
+  KeyRound,
 } from 'lucide-react';
 import { Category, Product, StoreSettings } from '@/types';
 import {
@@ -22,6 +22,7 @@ import {
   CustomServiceConfig,
   OLD_DEFAULT_DESC,
   NEW_GENERAL_DESC,
+  LOGO_PATH,
   getProductCardInfo,
   formatRupiah,
 } from './StorefrontTypes';
@@ -37,13 +38,9 @@ interface HomeTabViewProps {
   categories: Category[];
   settings: StoreSettings;
   customService: CustomServiceConfig;
-  totalCartItems: number;
-  favoriteIds: string[];
   addedProductId: string | null;
-  onOpenCart: () => void;
   onSelectProduct: (product: Product) => void;
   onAddToCart: (product: Product) => void;
-  onToggleFavorite: (productId: string) => void;
   onNavigateTab: (tab: StorefrontTab) => void;
   onJumpToShopWithFilter: (params: FilterJumpParams) => void;
 }
@@ -53,13 +50,9 @@ export default function HomeTabView({
   categories,
   settings,
   customService,
-  totalCartItems,
-  favoriteIds,
   addedProductId,
-  onOpenCart,
   onSelectProduct,
   onAddToCart,
-  onToggleFavorite,
   onNavigateTab,
   onJumpToShopWithFilter,
 }: HomeTabViewProps) {
@@ -71,7 +64,7 @@ export default function HomeTabView({
       ? NEW_GENERAL_DESC
       : settings.banner_description;
 
-  // Menampilkan 4 produk unggulan di Beranda ("Best for You")
+  // Menampilkan 4 produk unggulan di Beranda ("Pilihan Terbaik Untukmu")
   const featuredProducts = products.slice(0, 4);
 
   const handleQuickSearchSubmit = (e: React.FormEvent) => {
@@ -82,67 +75,43 @@ export default function HomeTabView({
   return (
     <div className="space-y-7 pb-8">
       {/* ==================================================================== */}
-      {/* BLOK ATAS HIJAU HUTAN GELAP (#0F2A1D) — GAYA GAMBAR 2 KIRI & GAMBAR 1 */}
+      {/* BLOK ATAS HIJAU HUTAN GELAP (#0F2A1D) — BERSIH TANPA TOMBOL GANDA */}
       {/* ==================================================================== */}
-      <section className="bg-[#0F2A1D] text-[#E3EED4] rounded-b-[36px] pt-4 pb-8 px-4 sm:px-8 relative overflow-hidden shadow-lg">
+      <section className="bg-[#0F2A1D] text-[#E3EED4] rounded-b-[36px] pt-5 pb-8 px-4 sm:px-8 relative overflow-hidden shadow-lg">
         <div className="w-64 h-64 rounded-full bg-[#375534]/40 blur-3xl absolute -top-20 -right-16 pointer-events-none" />
         <div className="w-52 h-52 rounded-full bg-[#6B9071]/20 blur-2xl absolute bottom-0 -left-16 pointer-events-none" />
 
         <div className="max-w-5xl mx-auto space-y-5 relative z-10">
-          {/* Baris Identitas Toko, Tombol Favorit & Tombol Keranjang Bulat */}
+          {/* Baris Identitas Toko & Pintasan Cek Pesanan Kustom */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
-                src="/logo.jpg"
+                src={LOGO_PATH}
                 alt={settings.store_name}
-                className="h-10 w-10 rounded-2xl object-cover border border-[#6B9071]/50 shrink-0"
+                className="h-11 w-11 rounded-2xl object-contain bg-white/95 p-0.5 border border-[#6B9071]/50 shrink-0 shadow-xs"
               />
               <div className="min-w-0">
                 <span className="block font-extrabold text-base sm:text-lg tracking-tight text-white truncate">
                   {settings.store_name}
                 </span>
                 <span className="block text-[11px] text-[#AEC3B0] truncate">
-                  Official Digital Store • Akses Instan
+                  Official Digital Store &amp; Custom Studio
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Tombol Bulat Favorit / Wishlist */}
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.92 }}
-                onClick={() => onNavigateTab('favorites')}
-                className="relative w-10 h-10 rounded-full bg-[#375534]/80 hover:bg-[#375534] text-[#E3EED4] border border-[#6B9071]/40 flex items-center justify-center transition-colors"
-                aria-label="Produk Favorit"
-              >
-                <Heart className="w-4 h-4 stroke-[2.2]" />
-                {favoriteIds.length > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#E3EED4] text-[#0F2A1D] text-[10px] font-extrabold flex items-center justify-center border-2 border-[#0F2A1D]">
-                    {favoriteIds.length}
-                  </span>
-                )}
-              </motion.button>
-
-              {/* Tombol Bulat Keranjang Belanja */}
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.92 }}
-                onClick={onOpenCart}
-                className="relative w-10 h-10 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shadow-sm hover:bg-white transition-colors"
-                aria-label="Buka Keranjang"
-              >
-                <ShoppingBag className="w-4 h-4 stroke-[2.2]" />
-                {totalCartItems > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#375534] text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-[#0F2A1D]">
-                    {totalCartItems}
-                  </span>
-                )}
-              </motion.button>
-            </div>
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.94 }}
+              onClick={() => onNavigateTab('services')}
+              className="px-3.5 py-2 rounded-full bg-[#375534]/85 hover:bg-[#375534] text-[#E3EED4] border border-[#6B9071]/40 text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors shrink-0"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-[#E3EED4]" />
+              <span>Cek Pesanan Kustom</span>
+            </motion.button>
           </div>
 
-          {/* Kolom Pencarian Kapsul (Seperti Search Bar Gambar 1 & 2 Kiri) */}
+          {/* Kolom Pencarian Kapsul */}
           <form onSubmit={handleQuickSearchSubmit} className="relative">
             <Search className="w-4 h-4 text-[#AEC3B0] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
@@ -160,7 +129,7 @@ export default function HomeTabView({
             </button>
           </form>
 
-          {/* Kartu Hero Utama Melengkung (Gaya Banner Gambar 1 & Gambar 2 Kiri) */}
+          {/* Kartu Hero Utama Melengkung (Gaya Banner Gambar 1 & Gambar 2) */}
           <div className="rounded-[28px] bg-gradient-to-br from-[#375534] via-[#466943] to-[#6B9071] p-6 sm:p-8 border border-[#AEC3B0]/35 relative overflow-hidden shadow-md">
             <div className="w-44 h-44 rounded-full bg-[#E3EED4]/15 blur-xl absolute -right-10 -bottom-10 pointer-events-none" />
 
@@ -178,7 +147,6 @@ export default function HomeTabView({
               </p>
 
               <div className="pt-2 flex flex-wrap items-center gap-3">
-                {/* Tombol Kapsul Gelap dengan Lingkaran Panah (Persis "Shop Now ↗" Gambar 1) */}
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.96 }}
@@ -197,8 +165,53 @@ export default function HomeTabView({
                   onClick={() => onNavigateTab('services')}
                   className="px-4 py-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white border border-[#E3EED4]/30 font-bold text-xs sm:text-sm transition-colors"
                 >
-                  Pesan Jasa Kustom
+                  Layanan Kustom &amp; Garansi
                 </motion.button>
+              </div>
+            </div>
+          </div>
+
+          {/* 3 Badge Keunggulan Utama (Bukan Tombol Navigasi Kembar) */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-1">
+            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
+                <Zap className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="block text-[11px] font-extrabold text-white truncate">
+                  Akses Instan
+                </span>
+                <span className="block text-[10px] text-[#AEC3B0] truncate">
+                  Terkirim detik itu juga
+                </span>
+              </div>
+            </div>
+
+            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
+                <QrCode className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="block text-[11px] font-extrabold text-white truncate">
+                  QRIS Resmi
+                </span>
+                <span className="block text-[10px] text-[#AEC3B0] truncate">
+                  Tanpa daftar akun
+                </span>
+              </div>
+            </div>
+
+            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="block text-[11px] font-extrabold text-white truncate">
+                  Garansi 100%
+                </span>
+                <span className="block text-[10px] text-[#AEC3B0] truncate">
+                  Aman &amp; terjamin
+                </span>
               </div>
             </div>
           </div>
@@ -209,76 +222,6 @@ export default function HomeTabView({
       {/* KONTEN UTAMA BERANDA (LATAR ALABASTER LEMBUT #F6F8F3) */}
       {/* ==================================================================== */}
       <div className="max-w-5xl mx-auto px-4 space-y-8">
-        {/* 4 Lingkaran Pintasan Fitur (Persis Deretan Ikon Bulat di Gambar 2 Kiri) */}
-        <section className="grid grid-cols-4 gap-2.5 sm:gap-4">
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.95 }}
-            onClick={() =>
-              onJumpToShopWithFilter({
-                filterMode: 'ALL',
-                categoryId: 'ALL',
-                search: '',
-              })
-            }
-            className="flex flex-col items-center text-center group"
-          >
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Store className="w-6 h-6 stroke-[2]" />
-            </div>
-            <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Semua Katalog
-            </span>
-          </motion.button>
-
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.95 }}
-            onClick={() =>
-              onJumpToShopWithFilter({
-                filterMode: 'DISCOUNT',
-                categoryId: 'ALL',
-              })
-            }
-            className="flex flex-col items-center text-center group"
-          >
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Tag className="w-6 h-6 stroke-[2]" />
-            </div>
-            <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Harga Promo
-            </span>
-          </motion.button>
-
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.95 }}
-            onClick={() => onNavigateTab('favorites')}
-            className="flex flex-col items-center text-center group"
-          >
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Heart className="w-6 h-6 stroke-[2]" />
-            </div>
-            <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Favoritku
-            </span>
-          </motion.button>
-
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.95 }}
-            onClick={() => onNavigateTab('services')}
-            className="flex flex-col items-center text-center group"
-          >
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Sparkles className="w-6 h-6 stroke-[2]" />
-            </div>
-            <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Jasa Kustom
-            </span>
-          </motion.button>
-        </section>
-
         {/* Deretan Kategori Kapsul (Seperti "Categories" + "See all" di Gambar 1) */}
         {categories.length > 0 && (
           <section className="space-y-3">
@@ -325,7 +268,7 @@ export default function HomeTabView({
                 Pilihan Terbaik Untukmu
               </h2>
               <p className="text-xs text-[#6B9071]">
-                Ketuk produk untuk detail lengkap, atau tekan (+) untuk langsung membeli
+                Ketuk produk untuk detail lengkap, atau tekan (+) untuk memasukkan ke keranjang
               </p>
             </div>
             <button
@@ -349,7 +292,6 @@ export default function HomeTabView({
               {featuredProducts.map((product) => {
                 const info = getProductCardInfo(product);
                 const isAdded = addedProductId === product.id;
-                const isFav = favoriteIds.includes(product.id);
 
                 return (
                   <motion.div
@@ -357,19 +299,18 @@ export default function HomeTabView({
                     whileHover={{ y: -3 }}
                     className="bg-white rounded-[24px] p-2.5 sm:p-3 border border-[#AEC3B0]/35 rf-card-shadow flex flex-col justify-between group"
                   >
-                    <div>
-                      {/* Bingkai Foto Krem Pistachio (#E3EED4) + Tombol Hati di Kanan Atas */}
-                      <div
-                        onClick={() => onSelectProduct(product)}
-                        className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3 cursor-pointer"
-                      >
+                    <div
+                      onClick={() => onSelectProduct(product)}
+                      className="cursor-pointer"
+                    >
+                      {/* Bingkai Foto Krem Pistachio (#E3EED4) */}
+                      <div className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3">
                         <img
                           src={info.coverThumb}
                           alt={product.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
 
-                        {/* Badge Diskon / Label Produk di Kiri Atas */}
                         {info.hasDiscount && info.savePercent > 0 ? (
                           <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white shadow-2xs">
                             Hemat {info.savePercent}%
@@ -380,25 +321,6 @@ export default function HomeTabView({
                           </span>
                         ) : null}
 
-                        {/* Tombol Bulat Hati (Favorit) di Pojok Kanan Atas (Persis Gambar 1 & 2) */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleFavorite(product.id);
-                          }}
-                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#0F2A1D] flex items-center justify-center shadow-xs transition-transform active:scale-90"
-                          aria-label="Simpan ke Favorit"
-                        >
-                          <Heart
-                            className={
-                              isFav
-                                ? 'w-4 h-4 fill-[#375534] text-[#375534]'
-                                : 'w-4 h-4 text-[#0F2A1D]'
-                            }
-                          />
-                        </button>
-
                         {info.thumbList.length > 1 && (
                           <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0F2A1D]/75 text-white inline-flex items-center gap-1">
                             <Images className="w-3 h-3" />
@@ -407,10 +329,7 @@ export default function HomeTabView({
                         )}
                       </div>
 
-                      <div
-                        onClick={() => onSelectProduct(product)}
-                        className="px-1 cursor-pointer"
-                      >
+                      <div className="px-1">
                         <h3 className="font-extrabold text-xs sm:text-sm text-[#0F2A1D] line-clamp-2 leading-snug mb-1 group-hover:text-[#375534] transition-colors">
                           {product.title}
                         </h3>
@@ -463,7 +382,7 @@ export default function HomeTabView({
           <div className="space-y-2 max-w-xl">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#375534] text-[11px] font-extrabold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Layanan Kustom Sesuai Permintaan</span>
+              <span>Layanan Kustom &amp; Cek Kode Pesanan</span>
             </span>
             <h3 className="text-base sm:text-xl font-extrabold text-[#0F2A1D]">
               {customService.title}
@@ -489,7 +408,7 @@ export default function HomeTabView({
             onClick={() => onNavigateTab('services')}
             className="self-start md:self-center pl-5 pr-2.5 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-bold text-xs sm:text-sm inline-flex items-center gap-3 shrink-0 transition-colors"
           >
-            <span>Pesan Jasa Kustom</span>
+            <span>Pesan / Cek Kode Kustom</span>
             <span className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center">
               <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
             </span>

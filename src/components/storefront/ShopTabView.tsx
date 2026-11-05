@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Images,
   FileText,
-  Heart,
 } from 'lucide-react';
 import { Category, Product } from '@/types';
 import {
@@ -31,11 +30,9 @@ interface ShopTabViewProps {
   onChangeCategoryId: (id: string) => void;
   searchQuery: string;
   onChangeSearchQuery: (q: string) => void;
-  favoriteIds: string[];
   addedProductId: string | null;
   onSelectProduct: (product: Product) => void;
   onAddToCart: (product: Product) => void;
-  onToggleFavorite: (productId: string) => void;
 }
 
 export default function ShopTabView({
@@ -47,17 +44,14 @@ export default function ShopTabView({
   onChangeCategoryId,
   searchQuery,
   onChangeSearchQuery,
-  favoriteIds,
   addedProductId,
   onSelectProduct,
   onAddToCart,
-  onToggleFavorite,
 }: ShopTabViewProps) {
   const topCatalogRef = useRef(null as HTMLDivElement | null);
   const [currentSlide, setCurrentSlide] = useState(1);
   const [showAllCategories, setShowAllCategories] = useState(false);
 
-  // Kembali ke halaman 1 setiap kali filter atau pencarian berubah
   useEffect(() => {
     setCurrentSlide(1);
   }, [filterMode, selectedCategoryId, searchQuery]);
@@ -111,16 +105,14 @@ export default function ShopTabView({
       ref={topCatalogRef}
       className="max-w-5xl mx-auto px-4 pt-5 pb-10 space-y-5"
     >
-      {/* Header Halaman Shop (Bersih & Estetik — Gaya Gambar 2 Tengah) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F2A1D] tracking-tight">
-            Katalog Produk Digital
-          </h1>
-          <p className="text-xs text-[#6B9071]">
-            Menampilkan {filteredProducts.length} produk siap unduh dengan pengiriman instan
-          </p>
-        </div>
+      {/* Header Halaman Katalog */}
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F2A1D] tracking-tight">
+          Katalog Produk Digital
+        </h1>
+        <p className="text-xs text-[#6B9071]">
+          Menampilkan {filteredProducts.length} produk siap unduh dengan pengiriman otomatis
+        </p>
       </div>
 
       {/* Kolom Pencarian Kapsul */}
@@ -144,7 +136,7 @@ export default function ShopTabView({
         )}
       </div>
 
-      {/* Filter Cepat (Semua Produk | Sedang Diskon | Harga Termurah) */}
+      {/* Filter Cepat (Semua Produk | Sedang Promo | Harga Termurah) */}
       <div className="grid grid-cols-3 gap-2 bg-[#E3EED4]/65 p-1.5 rounded-full border border-[#AEC3B0]/50">
         <button
           type="button"
@@ -181,7 +173,7 @@ export default function ShopTabView({
         </button>
       </div>
 
-      {/* Pil Kategori Kapsul (Persis Pil "All | Cleanser | Serum" di Gambar 2 Tengah) */}
+      {/* Pil Kategori Kapsul */}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -223,7 +215,7 @@ export default function ShopTabView({
         )}
       </div>
 
-      {/* Grid Produk (Maksimal 6 Produk per Slide — Gaya Kartu Gambar 2 Tengah) */}
+      {/* Grid Produk (Maksimal 6 Produk per Slide — Tanpa Tombol Hati) */}
       {filteredProducts.length === 0 ? (
         <div className="text-center py-14 bg-white rounded-[28px] border border-[#AEC3B0]/40 px-4 rf-card-shadow">
           <FileText className="w-10 h-10 text-[#6B9071] mx-auto mb-2.5 stroke-[1.5]" />
@@ -259,7 +251,6 @@ export default function ShopTabView({
               {paginatedProducts.map((product) => {
                 const info = getProductCardInfo(product);
                 const isAdded = addedProductId === product.id;
-                const isFav = favoriteIds.includes(product.id);
 
                 return (
                   <motion.div
@@ -267,11 +258,11 @@ export default function ShopTabView({
                     whileHover={{ y: -3 }}
                     className="bg-white rounded-[24px] p-2.5 sm:p-3.5 border border-[#AEC3B0]/35 rf-card-shadow flex flex-col justify-between group"
                   >
-                    <div>
-                      <div
-                        onClick={() => onSelectProduct(product)}
-                        className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3 cursor-pointer"
-                      >
+                    <div
+                      onClick={() => onSelectProduct(product)}
+                      className="cursor-pointer"
+                    >
+                      <div className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3">
                         <img
                           src={info.coverThumb}
                           alt={product.title}
@@ -288,25 +279,6 @@ export default function ShopTabView({
                           </span>
                         ) : null}
 
-                        {/* Tombol Hati Favorit di Kanan Atas */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleFavorite(product.id);
-                          }}
-                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#0F2A1D] flex items-center justify-center shadow-xs transition-transform active:scale-90"
-                          aria-label="Simpan ke Favorit"
-                        >
-                          <Heart
-                            className={
-                              isFav
-                                ? 'w-4 h-4 fill-[#375534] text-[#375534]'
-                                : 'w-4 h-4 text-[#0F2A1D]'
-                            }
-                          />
-                        </button>
-
                         {info.thumbList.length > 1 && (
                           <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0F2A1D]/75 text-white inline-flex items-center gap-1">
                             <Images className="w-3 h-3" />
@@ -315,10 +287,7 @@ export default function ShopTabView({
                         )}
                       </div>
 
-                      <div
-                        onClick={() => onSelectProduct(product)}
-                        className="px-1 cursor-pointer"
-                      >
+                      <div className="px-1">
                         <h2 className="font-extrabold text-xs sm:text-sm text-[#0F2A1D] line-clamp-2 leading-snug mb-1 group-hover:text-[#375534] transition-colors">
                           {product.title}
                         </h2>

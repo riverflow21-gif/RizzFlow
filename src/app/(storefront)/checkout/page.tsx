@@ -52,7 +52,6 @@ export default function CheckoutPage() {
   const [cart, setCart] = useState([] as CartItem[]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // State input pelanggan & promo (Tanpa kurung sudut generic agar bebas error)
   const [customerEmail, setCustomerEmail] = useState('');
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState(null as NullablePromo);
@@ -60,7 +59,6 @@ export default function CheckoutPage() {
   const [isValidatingPromo, setIsValidatingPromo] = useState(false);
   const [promoMessage, setPromoMessage] = useState(null as NullableFeedback);
 
-  // State pembuatan pesanan & QRIS
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState(null as NullableString);
   const [activeOrder, setActiveOrder] = useState(null as NullableOrder);
@@ -68,7 +66,6 @@ export default function CheckoutPage() {
   const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
-  // Muat isi keranjang saat halaman dibuka
   useEffect(() => {
     try {
       const saved = localStorage.getItem(CART_STORAGE_KEY);
@@ -94,7 +91,6 @@ export default function CheckoutPage() {
   const finalAmount = Math.max(0, subtotalAmount - discountAmount);
   const hasDiscount = discountAmount !== 0;
 
-  // Countdown Timer 1 Jam (3600 detik) untuk QRIS Aktif
   useEffect(() => {
     if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
 
@@ -110,7 +106,6 @@ export default function CheckoutPage() {
     return () => clearInterval(timerId);
   }, [activeOrder]);
 
-  // Polling status pembayaran setiap 4 detik saat QRIS sedang ditampilkan
   useEffect(() => {
     if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
 
@@ -274,7 +269,6 @@ export default function CheckoutPage() {
 
   return (
     <div className="min-h-screen bg-[#F6F8F3] text-[#0F2A1D] pb-16">
-      {/* Header Atas Checkout */}
       <header className="bg-[#0F2A1D] text-[#E3EED4] rounded-b-[32px] py-5 px-4 shadow-md mb-8">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <Link
@@ -295,7 +289,6 @@ export default function CheckoutPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4">
-        {/* TAMPILAN JIKA PESANAN SUDAH DIBUAT (MENUNGGU PEMBAYARAN QRIS / SUDAH LUNAS) */}
         {activeOrder ? (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -364,7 +357,6 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                {/* Kotak Kode QRIS */}
                 <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
                   <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs">
                     {activeOrder.qris_string ? (
@@ -429,9 +421,7 @@ export default function CheckoutPage() {
             </Link>
           </div>
         ) : (
-          /* FORMULIR CHECKOUT & RINGKASAN PESANAN */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Kolom Kiri: Daftar Produk di Keranjang */}
             <div className="lg:col-span-7 bg-white rounded-[28px] border border-[#AEC3B0]/50 p-6 rf-card-shadow space-y-4">
               <h1 className="text-lg font-extrabold text-[#0F2A1D]">
                 Ringkasan Produk ({cart.length} Item)
@@ -470,9 +460,9 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* Kolom Kanan: Input Email Tujuan, Kode Promo & Tombol Bayar QRIS */}
             <form
               onSubmit={handleCreateCheckoutOrder}
+              noValidate
               className="lg:col-span-5 bg-white rounded-[28px] border border-[#AEC3B0]/50 p-6 rf-card-shadow space-y-5"
             >
               <div>
@@ -480,7 +470,7 @@ export default function CheckoutPage() {
                   Detail Pengiriman &amp; Pembayaran
                 </h2>
                 <p className="text-xs text-[#6B9071] mt-0.5">
-                  File produk digital akan dikirimkan otomatis ke alamat email yang kamu isi di bawah ini.
+                  Lengkapi alamat email penerima di bawah ini untuk melanjutkan ke pembayaran QRIS.
                 </p>
               </div>
 
@@ -491,17 +481,20 @@ export default function CheckoutPage() {
                 <div className="relative">
                   <Mail className="w-4 h-4 text-[#6B9071] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
                     required
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="nama@gmail.com"
+                    placeholder="Contoh: nama@gmail.com"
                     className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
                   />
                 </div>
+                <p className="text-[11px] text-[#375534] mt-1.5 leading-relaxed">
+                  * Pastikan penulisan alamat email sudah benar karena link unduhan produk akan dikirimkan otomatis ke email ini.
+                </p>
               </div>
 
-              {/* Input Kode Promo */}
               <div>
                 <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
                   Kode Promo Diskon (Opsional)
@@ -542,7 +535,6 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {/* Rincian Kalkulasi Harga */}
               <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/50 space-y-2 text-xs">
                 <div className="flex justify-between text-[#375534]">
                   <span>Subtotal Produk</span>
@@ -584,7 +576,7 @@ export default function CheckoutPage() {
                   <>
                     <QrCode className="w-4 h-4 text-[#E3EED4]" />
                     <span>
-                      Bayar Sekarang via QRIS ({formatRupiah(finalAmount)})
+                      Lanjut Pembayaran QRIS ({formatRupiah(finalAmount)})
                     </span>
                   </>
                 )}
