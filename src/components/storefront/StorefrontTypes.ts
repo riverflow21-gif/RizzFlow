@@ -3,35 +3,26 @@ import {
   parseThumbnails,
   parseProductDeliverables,
   ProductDeliverables,
-  ProductSaleType,
   CustomServiceConfig,
   DEFAULT_CUSTOM_SERVICE_CONFIG,
-  SubscriptionOrder,
-  SubscriptionOrderStatus,
 } from '@/lib/supabase';
 
-// Re-export agar semua komponen halaman toko cukup mengimpor dari satu pintu
 export {
   parseThumbnails,
   parseProductDeliverables,
   DEFAULT_CUSTOM_SERVICE_CONFIG,
 };
 
-export type {
-  ProductDeliverables,
-  ProductSaleType,
-  CustomServiceConfig,
-  SubscriptionOrder,
-  SubscriptionOrderStatus,
-};
+export type { ProductDeliverables, CustomServiceConfig };
 
-// 4 Halaman Utama pada Navigasi Toko RizzFlow
-export type StorefrontTab = 'home' | 'shop' | 'track' | 'services';
+// 4 Halaman Utama pada Navigasi Toko RizzFlow (Identik dengan Gambar 1 & 2)
+export type StorefrontTab = 'home' | 'shop' | 'favorites' | 'services';
 
-// Filter Tipe Katalog Produk
-export type CatalogFilterType = 'ALL' | 'INSTAN' | 'LANGGANAN';
+// Mode Filter Cepat pada Halaman Katalog (Shop)
+export type ShopFilterMode = 'ALL' | 'DISCOUNT' | 'CHEAPEST';
 
 export const CART_STORAGE_KEY = 'rizzflow_cart_v1';
+export const FAVORITES_STORAGE_KEY = 'rizzflow_favorites_v1';
 export const PRODUCTS_PER_SLIDE = 6;
 export const VISIBLE_CATEGORY_LIMIT = 5;
 
@@ -39,10 +30,9 @@ export const OLD_DEFAULT_DESC =
   'Temukan template Excel, PPT, dan aset desain siap pakai untuk mempercepat produktivitasmu.';
 
 export const NEW_GENERAL_DESC =
-  'Koleksi produk digital pilihan, akun premium bergaransi, serta layanan pembuatan web dan template kustom untuk produktivitas terbaikmu.';
+  'Koleksi produk digital instan, e-book, dan template siap pakai serta layanan pembuatan web dan dokumen kustom untuk produktivitas terbaikmu.';
 
 export interface ProductCardComputedInfo {
-  isSubscription: boolean;
   origPrice: number | null;
   hasDiscount: boolean;
   savePercent: number;
@@ -52,14 +42,13 @@ export interface ProductCardComputedInfo {
 }
 
 /**
- * Menghitung informasi lengkap kartu produk (Foto sampul, status langganan,
- * harga coret, dan persentase diskon) agar kode di tiap halaman tetap ringkas.
+ * Menghitung informasi tampilan kartu produk (Foto sampul, harga coret,
+ * dan persentase diskon) untuk produk digital instan.
  */
 export function getProductCardInfo(product: Product): ProductCardComputedInfo {
   const thumbList = parseThumbnails(product.thumbnail_url);
   const coverThumb = thumbList[0] || '/logo.jpg';
   const deliverables = parseProductDeliverables(product.file_path);
-  const isSubscription = deliverables.product_type === 'LANGGANAN';
   const origPrice = deliverables.original_price ?? null;
   const hasDiscount =
     typeof origPrice === 'number' && origPrice > product.price;
@@ -69,7 +58,6 @@ export function getProductCardInfo(product: Product): ProductCardComputedInfo {
       : 0;
 
   return {
-    isSubscription,
     origPrice,
     hasDiscount,
     savePercent,
@@ -93,19 +81,19 @@ export interface FaqItem {
 
 export const FAQ_ITEMS: FaqItem[] = [
   {
-    q: 'Bagaimana cara kerja pembelian Produk Tipe Langganan (Netflix, CapCut Pro, dll.)?',
-    a: 'Saat memilih produk bertanda "Langganan", kamu langsung diberikan 2 pilihan: (1) Chat Admin langsung via WhatsApp/Telegram untuk transaksi cepat, atau (2) Ambil Kode Antrian 4 Angka tanpa bayar di awal, tunggu balasan email konfirmasi stok dari Admin (maksimal 2 jam), lalu bayar via QRIS langsung di halaman Lacak Kode.',
+    q: 'Bagaimana cara menerima file produk setelah saya membayar QRIS?',
+    a: 'Begitu kamu selesai memindai dan membayar kode QRIS, sistem otomatis RizzFlow langsung mendeteksi pembayaranmu dalam hitungan detik dan mengirimkan link unduhan produk ke alamat email yang kamu isi saat Checkout.',
   },
   {
-    q: 'Bagaimana cara menerima file untuk Produk Instan (E-Book, Template Excel, PPT)?',
-    a: 'Untuk produk bertanda "Instan", klik tombol (+) pada produk untuk memasukkan ke keranjang, lanjutkan ke Checkout, isi email aktifmu, dan bayar via QRIS. Detik itu juga setelah pembayaran terdeteksi lunas, link unduhan otomatis dikirim ke kotak masuk emailmu.',
+    q: 'Apakah saya harus membuat akun atau login terlebih dahulu untuk berbelanja?',
+    a: 'Tidak perlu! Di RizzFlow kamu bisa langsung berbelanja tanpa perlu daftar akun (Guest Checkout). Cukup pilih produk, masukkan email aktifmu, dan bayar via QRIS.',
   },
   {
-    q: 'Bagaimana jika email produk belum masuk atau ada kendala?',
-    a: 'Periksa tab Promosi/Spam di Gmail kamu, atau buka menu "Layanan" di navigasi bawah lalu isi Canvas Klaim Garansi dengan mencantumkan email atau nomor invoice-mu. Notifikasi akan langsung berbunyi di perangkat Admin kami.',
+    q: 'Bagaimana jika email produk belum masuk ke kotak masuk utama?',
+    a: 'Periksa tab Promosi atau folder Spam di aplikasi Gmail kamu. Jika masih belum ditemukan, silakan isi Canvas Klaim Garansi di halaman Layanan dengan mencantumkan email atau nomor invoice-mu agar Admin segera mengirimkan ulang.',
   },
   {
     q: 'Bagaimana cara memesan Layanan Kustom (Pembuatan Web Sederhana / Template Excel)?',
-    a: 'Buka halaman "Layanan" melalui navigasi bawah, pilih tab "Jasa Kustom" pada formulir pesan, lalu tuliskan detail website atau rumus Excel yang kamu butuhkan. Admin kami akan segera menghubungi kamu.',
+    a: 'Buka menu "Layanan" di navigasi bawah, ketuk jenis layanan kustom yang kamu inginkan atau pilih tab "Jasa Kustom" pada formulir pesan, lalu tuliskan detail kebutuhanmu. Admin kami akan segera menghubungi kamu.',
   },
 ];

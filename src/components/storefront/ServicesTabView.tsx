@@ -26,6 +26,16 @@ interface ServicesTabViewProps {
   telegramUrl: string | null;
 }
 
+type MessageCategoryType = 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
+
+interface FeedbackState {
+  type: 'success' | 'error';
+  text: string;
+}
+
+type NullableFeedback = FeedbackState | null;
+type NullableNumber = number | null;
+
 export default function ServicesTabView({
   customService,
   storeName,
@@ -35,7 +45,7 @@ export default function ServicesTabView({
   const formRef = useRef(null as HTMLDivElement | null);
 
   const [msgType, setMsgType] = useState(
-    'LAYANAN_KHUSUS' as 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN'
+    'LAYANAN_KHUSUS' as MessageCategoryType
   );
   const [senderName, setSenderName] = useState('');
   const [senderEmail, setSenderEmail] = useState('');
@@ -43,10 +53,8 @@ export default function ServicesTabView({
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [messageText, setMessageText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [feedback, setFeedback] = useState(
-    null as { type: 'success' | 'error'; text: string } | null
-  );
-  const [openFaqIndex, setOpenFaqIndex] = useState(0 as number | null);
+  const [feedback, setFeedback] = useState(null as NullableFeedback);
+  const [openFaqIndex, setOpenFaqIndex] = useState(0 as NullableNumber);
 
   const handleSelectServiceChip = (serviceName: string) => {
     setMsgType('LAYANAN_KHUSUS');
@@ -177,10 +185,10 @@ export default function ServicesTabView({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
           <div className="sm:max-w-[210px] shrink-0">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#375534]">
-              ⚡ Praktis &amp; Aman
+              ⚡ Otomatis 24/7
             </span>
             <h2 className="text-base sm:text-lg font-extrabold text-[#0F2A1D] mt-0.5">
-              3 Langkah Mudah Transaksi di {storeName}
+              3 Langkah Instan Belanja di {storeName}
             </h2>
           </div>
 
@@ -212,7 +220,7 @@ export default function ServicesTabView({
                 1. Pilih Produk
               </span>
               <span className="text-[10px] text-[#375534] hidden sm:inline mt-0.5">
-                Instan / Langganan
+                Masukkan keranjang
               </span>
             </motion.div>
 
@@ -247,10 +255,10 @@ export default function ServicesTabView({
                 <MailCheck className="w-4 h-4" />
               </motion.div>
               <span className="text-xs font-extrabold text-[#0F2A1D]">
-                3. Terima Produk
+                3. Cek Emailmu!
               </span>
               <span className="text-[10px] text-[#375534] hidden sm:inline mt-0.5">
-                Otomatis ke Email
+                File langsung masuk
               </span>
             </motion.div>
           </div>
@@ -344,7 +352,7 @@ export default function ServicesTabView({
                 type="text"
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
-                placeholder="No. Invoice / Kode 4 Angka (Opsional)"
+                placeholder="Nomor Invoice (Jika Klaim Garansi)"
                 className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
               />
             </div>

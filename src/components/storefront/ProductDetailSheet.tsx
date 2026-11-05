@@ -12,8 +12,8 @@ import {
   QrCode,
   UserCheck,
   ShieldCheck,
-  Crown,
   CheckCircle2,
+  Heart,
 } from 'lucide-react';
 import { Product } from '@/types';
 import { getProductCardInfo, formatRupiah } from './StorefrontTypes';
@@ -23,6 +23,8 @@ type DetailSubTab = 'deskripsi' | 'akses' | 'garansi';
 interface ProductDetailSheetProps {
   product: Product | null;
   storeName: string;
+  isFavorite: boolean;
+  onToggleFavorite: (productId: string) => void;
   onClose: () => void;
   onAddWithQuantity: (product: Product, quantity: number) => void;
 }
@@ -30,6 +32,8 @@ interface ProductDetailSheetProps {
 export default function ProductDetailSheet({
   product,
   storeName,
+  isFavorite,
+  onToggleFavorite,
   onClose,
   onAddWithQuantity,
 }: ProductDetailSheetProps) {
@@ -69,7 +73,7 @@ export default function ProductDetailSheet({
           onClick={(e) => e.stopPropagation()}
           className="relative bg-[#F6F8F3] w-full sm:max-w-lg rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl h-[68vh] sm:h-[76vh] flex flex-col touch-auto border border-[#AEC3B0]/50"
         >
-          {/* Bar Atas Lembaran Detail (Tombol < Kembali, Judul "Details", & Label Tipe) */}
+          {/* Bar Atas Lembaran Detail (Tombol < Kembali, Judul "Details", & Tombol Hati Favorit) */}
           <div className="px-5 pt-3.5 pb-2.5 flex items-center justify-between bg-[#F6F8F3] shrink-0">
             <button
               type="button"
@@ -84,15 +88,20 @@ export default function ProductDetailSheet({
               Detail Produk
             </span>
 
-            <span
-              className={
-                info.isSubscription
-                  ? 'px-3 py-1 rounded-full text-[11px] font-extrabold bg-[#0F2A1D] text-[#E3EED4]'
-                  : 'px-3 py-1 rounded-full text-[11px] font-extrabold bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/60'
-              }
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(product.id)}
+              className="w-9 h-9 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/50 flex items-center justify-center shadow-xs transition-transform active:scale-90"
+              aria-label="Simpan ke Favorit"
             >
-              {info.isSubscription ? '👑 Langganan' : '⚡ Instan'}
-            </span>
+              <Heart
+                className={
+                  isFavorite
+                    ? 'w-4 h-4 fill-[#375534] text-[#375534]'
+                    : 'w-4 h-4 text-[#0F2A1D]'
+                }
+              />
+            </button>
           </div>
 
           {/* ================================================================ */}
@@ -107,6 +116,12 @@ export default function ProductDetailSheet({
                   alt={product.title}
                   className="w-full h-full object-cover"
                 />
+
+                {info.hasDiscount && info.savePercent > 0 && (
+                  <span className="absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-extrabold bg-[#375534] text-white shadow-xs">
+                    Hemat {info.savePercent}%
+                  </span>
+                )}
 
                 {images.length > 1 && (
                   <>
@@ -159,7 +174,7 @@ export default function ProductDetailSheet({
             {/* Judul Produk & Badge */}
             <div className="space-y-1">
               {product.badge && (
-                <span className="text-xs font-extrabold text-[#375534]">
+                <span className="inline-block px-3 py-0.5 rounded-full bg-[#E3EED4] text-[#375534] text-xs font-extrabold">
                   {product.badge}
                 </span>
               )}
@@ -184,36 +199,34 @@ export default function ProductDetailSheet({
                     <CheckCircle2 className="w-3.5 h-3.5 text-[#375534] shrink-0" />
                   </div>
                   <span className="block text-[11px] text-[#6B9071] truncate">
-                    Terverifikasi • Garansi Penuh
+                    Pengiriman Instan • Bergaransi
                   </span>
                 </div>
               </div>
 
-              {/* Pengatur Jumlah QTY untuk Produk Instan */}
-              {!info.isSubscription && (
-                <div className="inline-flex items-center gap-2.5 bg-[#E3EED4]/70 border border-[#AEC3B0]/60 rounded-full px-2.5 py-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="w-6 h-6 rounded-full bg-white text-[#0F2A1D] flex items-center justify-center font-bold shadow-2xs"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="text-xs font-extrabold text-[#0F2A1D] w-4 text-center">
-                    {quantity}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity((q) => q + 1)}
-                    className="w-6 h-6 rounded-full bg-[#0F2A1D] text-white flex items-center justify-center font-bold shadow-2xs"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
+              {/* Pengatur Jumlah QTY */}
+              <div className="inline-flex items-center gap-2.5 bg-[#E3EED4]/70 border border-[#AEC3B0]/60 rounded-full px-2.5 py-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="w-6 h-6 rounded-full bg-white text-[#0F2A1D] flex items-center justify-center font-bold shadow-2xs"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+                <span className="text-xs font-extrabold text-[#0F2A1D] w-4 text-center">
+                  {quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
+                  className="w-6 h-6 rounded-full bg-[#0F2A1D] text-white flex items-center justify-center font-bold shadow-2xs"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
             </div>
 
-            {/* 3 Tab Informasi di Dalam Detail (Persis "Details | Ingredients | Reviews" Gambar 2 Kanan) */}
+            {/* 3 Tab Informasi di Dalam Detail (Persis Gambar 2 Kanan) */}
             <div className="space-y-3">
               <div className="flex items-center gap-5 border-b border-[#AEC3B0]/50">
                 <button
@@ -260,33 +273,12 @@ export default function ProductDetailSheet({
 
                 {detailTab === 'akses' && (
                   <div className="space-y-2 text-xs text-[#375534]">
-                    {info.isSubscription ? (
-                      <>
-                        <p className="font-extrabold text-[#0F2A1D]">
-                          👑 Alur Pembelian Produk Tipe Langganan:
-                        </p>
-                        <p>
-                          Saat kamu menekan tombol beli di bawah, kamu langsung diberikan <strong>2 pilihan mudah</strong>:
-                        </p>
-                        <ul className="list-disc pl-4 space-y-1">
-                          <li>
-                            <strong>Opsi 1 (Respon Cepat):</strong> Langsung terhubung ke WhatsApp atau Telegram Admin kami.
-                          </li>
-                          <li>
-                            <strong>Opsi 2 (Via Website):</strong> Ambil Kode Antrian 4 Angka gratis, terima konfirmasi stok via email, dan bayar via QRIS di menu <em>Lacak Kode</em>.
-                          </li>
-                        </ul>
-                      </>
-                    ) : (
-                      <>
-                        <p className="font-extrabold text-[#0F2A1D]">
-                          ⚡ Pengiriman File Otomatis Detik Itu Juga:
-                        </p>
-                        <p>
-                          Masukkan produk ini ke keranjang, isi alamat email aktifmu di halaman Checkout, lalu pindai kode QRIS. Begitu pembayaran berhasil, link unduhan langsung terkirim otomatis ke emailmu!
-                        </p>
-                      </>
-                    )}
+                    <p className="font-extrabold text-[#0F2A1D]">
+                      ⚡ Pengiriman File Otomatis Detik Itu Juga:
+                    </p>
+                    <p>
+                      Masukkan produk ini ke keranjang, isi alamat email aktifmu di halaman Checkout, lalu pindai kode QRIS. Begitu pembayaran terdeteksi lunas, link unduhan produk langsung terkirim otomatis ke kotak masuk emailmu!
+                    </p>
                   </div>
                 )}
 
@@ -296,7 +288,7 @@ export default function ProductDetailSheet({
                       🛡️ Garansi Resmi 100% {storeName}:
                     </p>
                     <p>
-                      Seluruh produk yang kamu beli dijamin sesuai deskripsi. Jika terdapat kendala pengiriman email atau akses produk, kamu dapat langsung mengirim klaim di halaman <strong>Layanan</strong> untuk penanganan prioritas.
+                      Seluruh produk digital yang kamu beli dijamin dapat diakses dan sesuai deskripsi. Jika terdapat kendala pengiriman email atau file, kamu dapat langsung mengisi Canvas Klaim Garansi di menu <strong>Layanan</strong>.
                     </p>
                   </div>
                 )}
@@ -310,7 +302,7 @@ export default function ProductDetailSheet({
                   <Zap className="w-4 h-4" />
                 </div>
                 <span className="text-[10px] font-bold text-[#0F2A1D] leading-tight">
-                  Proses Cepat
+                  Akses Instan
                 </span>
               </div>
 
@@ -369,17 +361,8 @@ export default function ProductDetailSheet({
               onClick={() => onAddWithQuantity(product, quantity)}
               className="px-6 py-3.5 rounded-full bg-[#375534] hover:bg-[#0F2A1D] text-white font-extrabold text-xs sm:text-sm inline-flex items-center gap-2 shadow-md transition-colors"
             >
-              {info.isSubscription ? (
-                <>
-                  <Crown className="w-4 h-4 text-[#E3EED4]" />
-                  <span>Pilih Opsi Pembelian</span>
-                </>
-              ) : (
-                <>
-                  <ShoppingBag className="w-4 h-4 text-[#E3EED4]" />
-                  <span>Tambah ke Keranjang</span>
-                </>
-              )}
+              <ShoppingBag className="w-4 h-4 text-[#E3EED4]" />
+              <span>Tambah ke Keranjang</span>
             </motion.button>
           </div>
         </motion.div>

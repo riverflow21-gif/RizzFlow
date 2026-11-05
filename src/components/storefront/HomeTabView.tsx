@@ -9,16 +9,16 @@ import {
   Check,
   ArrowUpRight,
   ChevronRight,
-  Zap,
-  Crown,
-  KeyRound,
   Sparkles,
   Images,
+  Heart,
+  Store,
+  Tag,
 } from 'lucide-react';
 import { Category, Product, StoreSettings } from '@/types';
 import {
   StorefrontTab,
-  CatalogFilterType,
+  ShopFilterMode,
   CustomServiceConfig,
   OLD_DEFAULT_DESC,
   NEW_GENERAL_DESC,
@@ -27,7 +27,7 @@ import {
 } from './StorefrontTypes';
 
 interface FilterJumpParams {
-  type?: CatalogFilterType;
+  filterMode?: ShopFilterMode;
   categoryId?: string;
   search?: string;
 }
@@ -38,10 +38,12 @@ interface HomeTabViewProps {
   settings: StoreSettings;
   customService: CustomServiceConfig;
   totalCartItems: number;
+  favoriteIds: string[];
   addedProductId: string | null;
   onOpenCart: () => void;
   onSelectProduct: (product: Product) => void;
   onAddToCart: (product: Product) => void;
+  onToggleFavorite: (productId: string) => void;
   onNavigateTab: (tab: StorefrontTab) => void;
   onJumpToShopWithFilter: (params: FilterJumpParams) => void;
 }
@@ -52,10 +54,12 @@ export default function HomeTabView({
   settings,
   customService,
   totalCartItems,
+  favoriteIds,
   addedProductId,
   onOpenCart,
   onSelectProduct,
   onAddToCart,
+  onToggleFavorite,
   onNavigateTab,
   onJumpToShopWithFilter,
 }: HomeTabViewProps) {
@@ -67,7 +71,7 @@ export default function HomeTabView({
       ? NEW_GENERAL_DESC
       : settings.banner_description;
 
-  // Ambil 4 produk terbaru/unggulan untuk ditampilkan di Beranda ("Best for You")
+  // Menampilkan 4 produk unggulan di Beranda ("Best for You")
   const featuredProducts = products.slice(0, 4);
 
   const handleQuickSearchSubmit = (e: React.FormEvent) => {
@@ -81,12 +85,11 @@ export default function HomeTabView({
       {/* BLOK ATAS HIJAU HUTAN GELAP (#0F2A1D) — GAYA GAMBAR 2 KIRI & GAMBAR 1 */}
       {/* ==================================================================== */}
       <section className="bg-[#0F2A1D] text-[#E3EED4] rounded-b-[36px] pt-4 pb-8 px-4 sm:px-8 relative overflow-hidden shadow-lg">
-        {/* Ornamen Lingkaran Cahaya Halus di Latar Belakang */}
         <div className="w-64 h-64 rounded-full bg-[#375534]/40 blur-3xl absolute -top-20 -right-16 pointer-events-none" />
         <div className="w-52 h-52 rounded-full bg-[#6B9071]/20 blur-2xl absolute bottom-0 -left-16 pointer-events-none" />
 
         <div className="max-w-5xl mx-auto space-y-5 relative z-10">
-          {/* Baris Identitas Toko & Tombol Keranjang Bulat */}
+          {/* Baris Identitas Toko, Tombol Favorit & Tombol Keranjang Bulat */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
@@ -99,22 +102,29 @@ export default function HomeTabView({
                   {settings.store_name}
                 </span>
                 <span className="block text-[11px] text-[#AEC3B0] truncate">
-                  Official Digital &amp; Premium Store
+                  Official Digital Store • Akses Instan
                 </span>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Tombol Bulat Favorit / Wishlist */}
               <motion.button
                 type="button"
-                whileTap={{ scale: 0.94 }}
-                onClick={() => onNavigateTab('track')}
-                className="px-3.5 py-2 rounded-full bg-[#375534]/80 hover:bg-[#375534] text-[#E3EED4] border border-[#6B9071]/40 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                whileTap={{ scale: 0.92 }}
+                onClick={() => onNavigateTab('favorites')}
+                className="relative w-10 h-10 rounded-full bg-[#375534]/80 hover:bg-[#375534] text-[#E3EED4] border border-[#6B9071]/40 flex items-center justify-center transition-colors"
+                aria-label="Produk Favorit"
               >
-                <KeyRound className="w-3.5 h-3.5 text-[#E3EED4]" />
-                <span>Cek 4 Angka</span>
+                <Heart className="w-4 h-4 stroke-[2.2]" />
+                {favoriteIds.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#E3EED4] text-[#0F2A1D] text-[10px] font-extrabold flex items-center justify-center border-2 border-[#0F2A1D]">
+                    {favoriteIds.length}
+                  </span>
+                )}
               </motion.button>
 
+              {/* Tombol Bulat Keranjang Belanja */}
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.92 }}
@@ -139,7 +149,7 @@ export default function HomeTabView({
               type="text"
               value={quickSearch}
               onChange={(e) => setQuickSearch(e.target.value)}
-              placeholder="Cari template, e-book, Netflix, CapCut Pro..."
+              placeholder="Cari e-book, template Excel, slide PPT, atau aset digital..."
               className="w-full pl-11 pr-24 py-3.5 rounded-full bg-[#375534]/55 border border-[#6B9071]/40 text-xs sm:text-sm text-white placeholder:text-[#AEC3B0] focus:outline-none focus:border-[#E3EED4] focus:bg-[#375534]/80 transition-all"
             />
             <button
@@ -156,11 +166,11 @@ export default function HomeTabView({
 
             <div className="max-w-xl space-y-3 relative z-10">
               <span className="inline-block px-3.5 py-1 rounded-full bg-[#0F2A1D]/75 text-[#E3EED4] text-[11px] font-bold tracking-wide">
-                ✨ Pengiriman Otomatis &amp; Bergaransi Penuh
+                ⚡ Pengiriman File Otomatis 24/7 via Email
               </span>
 
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight tracking-tight">
-                Koleksi Produk Digital &amp; Layanan Kustom Terbaik
+                Solusi Produk Digital Instan &amp; Jasa Kustom
               </h1>
 
               <p className="text-xs sm:text-sm text-[#E3EED4]/90 leading-relaxed">
@@ -187,7 +197,7 @@ export default function HomeTabView({
                   onClick={() => onNavigateTab('services')}
                   className="px-4 py-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white border border-[#E3EED4]/30 font-bold text-xs sm:text-sm transition-colors"
                 >
-                  Jasa Kustom &amp; Garansi
+                  Pesan Jasa Kustom
                 </motion.button>
               </div>
             </div>
@@ -204,42 +214,53 @@ export default function HomeTabView({
           <motion.button
             type="button"
             whileTap={{ scale: 0.95 }}
-            onClick={() => onJumpToShopWithFilter({ type: 'INSTAN' })}
+            onClick={() =>
+              onJumpToShopWithFilter({
+                filterMode: 'ALL',
+                categoryId: 'ALL',
+                search: '',
+              })
+            }
             className="flex flex-col items-center text-center group"
           >
             <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Zap className="w-6 h-6 stroke-[2]" />
+              <Store className="w-6 h-6 stroke-[2]" />
             </div>
             <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              File Instan
+              Semua Katalog
             </span>
           </motion.button>
 
           <motion.button
             type="button"
             whileTap={{ scale: 0.95 }}
-            onClick={() => onJumpToShopWithFilter({ type: 'LANGGANAN' })}
+            onClick={() =>
+              onJumpToShopWithFilter({
+                filterMode: 'DISCOUNT',
+                categoryId: 'ALL',
+              })
+            }
             className="flex flex-col items-center text-center group"
           >
             <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <Crown className="w-6 h-6 stroke-[2]" />
+              <Tag className="w-6 h-6 stroke-[2]" />
             </div>
             <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Langganan
+              Harga Promo
             </span>
           </motion.button>
 
           <motion.button
             type="button"
             whileTap={{ scale: 0.95 }}
-            onClick={() => onNavigateTab('track')}
+            onClick={() => onNavigateTab('favorites')}
             className="flex flex-col items-center text-center group"
           >
             <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#E3EED4] group-hover:bg-[#375534] text-[#0F2A1D] group-hover:text-white border border-[#AEC3B0]/60 flex items-center justify-center transition-all rf-card-shadow mb-2">
-              <KeyRound className="w-6 h-6 stroke-[2]" />
+              <Heart className="w-6 h-6 stroke-[2]" />
             </div>
             <span className="text-[11px] sm:text-xs font-extrabold text-[#0F2A1D]">
-              Cek 4 Angka
+              Favoritku
             </span>
           </motion.button>
 
@@ -263,7 +284,7 @@ export default function HomeTabView({
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base sm:text-lg font-extrabold text-[#0F2A1D]">
-                Kategori Produk
+                Kategori Pilihan
               </h2>
               <button
                 type="button"
@@ -282,7 +303,10 @@ export default function HomeTabView({
                   type="button"
                   whileTap={{ scale: 0.96 }}
                   onClick={() =>
-                    onJumpToShopWithFilter({ categoryId: cat.id })
+                    onJumpToShopWithFilter({
+                      categoryId: cat.id,
+                      filterMode: 'ALL',
+                    })
                   }
                   className="px-4 py-2.5 rounded-2xl bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#AEC3B0]/50 text-xs font-bold whitespace-nowrap transition-colors rf-card-shadow"
                 >
@@ -293,7 +317,7 @@ export default function HomeTabView({
           </section>
         )}
 
-        {/* Seksi "Pilihan Terbaik Untukmu" (Gaya Kartu Gambar 2 Kiri & Tengah) */}
+        {/* Seksi "Pilihan Terbaik Untukmu" (Gaya Kartu Gambar 1 & Gambar 2) */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -301,7 +325,7 @@ export default function HomeTabView({
                 Pilihan Terbaik Untukmu
               </h2>
               <p className="text-xs text-[#6B9071]">
-                Ketuk gambar untuk melihat detail, atau tekan tombol (+) untuk membeli
+                Ketuk produk untuk detail lengkap, atau tekan (+) untuk langsung membeli
               </p>
             </div>
             <button
@@ -325,6 +349,7 @@ export default function HomeTabView({
               {featuredProducts.map((product) => {
                 const info = getProductCardInfo(product);
                 const isAdded = addedProductId === product.id;
+                const isFav = favoriteIds.includes(product.id);
 
                 return (
                   <motion.div
@@ -332,38 +357,47 @@ export default function HomeTabView({
                     whileHover={{ y: -3 }}
                     className="bg-white rounded-[24px] p-2.5 sm:p-3 border border-[#AEC3B0]/35 rf-card-shadow flex flex-col justify-between group"
                   >
-                    {/* Area Klik Detail Produk */}
-                    <div
-                      onClick={() => onSelectProduct(product)}
-                      className="cursor-pointer"
-                    >
-                      {/* Bingkai Foto Krem Pistachio (#E3EED4) */}
-                      <div className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3">
+                    <div>
+                      {/* Bingkai Foto Krem Pistachio (#E3EED4) + Tombol Hati di Kanan Atas */}
+                      <div
+                        onClick={() => onSelectProduct(product)}
+                        className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3 cursor-pointer"
+                      >
                         <img
                           src={info.coverThumb}
                           alt={product.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
 
-                        {/* Badge Tipe / Label di Kiri Atas */}
-                        <span
-                          className={
-                            info.isSubscription
-                              ? 'absolute top-2 left-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#0F2A1D] text-[#E3EED4]'
-                              : 'absolute top-2 left-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4]/95 text-[#0F2A1D] border border-[#AEC3B0]/60'
-                          }
-                        >
-                          {info.isSubscription
-                            ? '👑 Langganan'
-                            : product.badge || '⚡ Instan'}
-                        </span>
-
-                        {/* Badge Persentase Hemat di Kanan Atas */}
-                        {info.hasDiscount && info.savePercent > 0 && (
-                          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white">
-                            -{info.savePercent}%
+                        {/* Badge Diskon / Label Produk di Kiri Atas */}
+                        {info.hasDiscount && info.savePercent > 0 ? (
+                          <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white shadow-2xs">
+                            Hemat {info.savePercent}%
                           </span>
-                        )}
+                        ) : product.badge ? (
+                          <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4]/95 text-[#0F2A1D] border border-[#AEC3B0]/60">
+                            {product.badge}
+                          </span>
+                        ) : null}
+
+                        {/* Tombol Bulat Hati (Favorit) di Pojok Kanan Atas (Persis Gambar 1 & 2) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFavorite(product.id);
+                          }}
+                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#0F2A1D] flex items-center justify-center shadow-xs transition-transform active:scale-90"
+                          aria-label="Simpan ke Favorit"
+                        >
+                          <Heart
+                            className={
+                              isFav
+                                ? 'w-4 h-4 fill-[#375534] text-[#375534]'
+                                : 'w-4 h-4 text-[#0F2A1D]'
+                            }
+                          />
+                        </button>
 
                         {info.thumbList.length > 1 && (
                           <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0F2A1D]/75 text-white inline-flex items-center gap-1">
@@ -373,7 +407,10 @@ export default function HomeTabView({
                         )}
                       </div>
 
-                      <div className="px-1">
+                      <div
+                        onClick={() => onSelectProduct(product)}
+                        className="px-1 cursor-pointer"
+                      >
                         <h3 className="font-extrabold text-xs sm:text-sm text-[#0F2A1D] line-clamp-2 leading-snug mb-1 group-hover:text-[#375534] transition-colors">
                           {product.title}
                         </h3>
@@ -383,7 +420,7 @@ export default function HomeTabView({
                       </div>
                     </div>
 
-                    {/* Baris Bawah Kartu: Harga di Kiri & Tombol Bulat (+) di Kanan (Persis Gambar 2) */}
+                    {/* Baris Bawah Kartu: Harga di Kiri & Tombol Bulat (+) di Kanan */}
                     <div className="px-1 pt-1 flex items-end justify-between gap-2">
                       <div className="min-w-0">
                         {info.hasDiscount && info.origPrice && (
@@ -405,11 +442,7 @@ export default function HomeTabView({
                             ? 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#375534] text-white flex items-center justify-center shrink-0 shadow-sm'
                             : 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] flex items-center justify-center shrink-0 shadow-sm transition-colors'
                         }
-                        title={
-                          info.isSubscription
-                            ? 'Pilih Opsi Pembelian Langganan'
-                            : 'Tambah ke Keranjang'
-                        }
+                        title="Tambah ke Keranjang"
                       >
                         {isAdded ? (
                           <Check className="w-4 h-4 stroke-[2.5]" />

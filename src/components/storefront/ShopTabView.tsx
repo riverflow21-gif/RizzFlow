@@ -11,11 +11,11 @@ import {
   ChevronRight,
   Images,
   FileText,
-  Info,
+  Heart,
 } from 'lucide-react';
 import { Category, Product } from '@/types';
 import {
-  CatalogFilterType,
+  ShopFilterMode,
   PRODUCTS_PER_SLIDE,
   VISIBLE_CATEGORY_LIMIT,
   getProductCardInfo,
@@ -25,50 +25,49 @@ import {
 interface ShopTabViewProps {
   products: Product[];
   categories: Category[];
-  catalogTypeFilter: CatalogFilterType;
-  onChangeCatalogType: (type: CatalogFilterType) => void;
+  filterMode: ShopFilterMode;
+  onChangeFilterMode: (mode: ShopFilterMode) => void;
   selectedCategoryId: string;
   onChangeCategoryId: (id: string) => void;
   searchQuery: string;
   onChangeSearchQuery: (q: string) => void;
+  favoriteIds: string[];
   addedProductId: string | null;
   onSelectProduct: (product: Product) => void;
   onAddToCart: (product: Product) => void;
-  onOpenSubGuide: () => void;
+  onToggleFavorite: (productId: string) => void;
 }
 
 export default function ShopTabView({
   products,
   categories,
-  catalogTypeFilter,
-  onChangeCatalogType,
+  filterMode,
+  onChangeFilterMode,
   selectedCategoryId,
   onChangeCategoryId,
   searchQuery,
   onChangeSearchQuery,
+  favoriteIds,
   addedProductId,
   onSelectProduct,
   onAddToCart,
-  onOpenSubGuide,
+  onToggleFavorite,
 }: ShopTabViewProps) {
   const topCatalogRef = useRef(null as HTMLDivElement | null);
   const [currentSlide, setCurrentSlide] = useState(1);
   const [showAllCategories, setShowAllCategories] = useState(false);
 
-  // Kembali ke slide 1 setiap kali filter berubah
+  // Kembali ke halaman 1 setiap kali filter atau pencarian berubah
   useEffect(() => {
     setCurrentSlide(1);
-  }, [catalogTypeFilter, selectedCategoryId, searchQuery]);
+  }, [filterMode, selectedCategoryId, searchQuery]);
 
   const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
+    const matching = products.filter((product) => {
       const info = getProductCardInfo(product);
-      const pType: CatalogFilterType = info.isSubscription
-        ? 'LANGGANAN'
-        : 'INSTAN';
 
-      const matchesType =
-        catalogTypeFilter === 'ALL' || pType === catalogTypeFilter;
+      const matchesMode =
+        filterMode !== 'DISCOUNT' || (info.hasDiscount && info.savePercent > 0);
       const matchesCategory =
         selectedCategoryId === 'ALL' ||
         product.category_id === selectedCategoryId;
@@ -78,9 +77,15 @@ export default function ShopTabView({
         product.title.toLowerCase().includes(q) ||
         product.description.toLowerCase().includes(q);
 
-      return matchesType && matchesCategory && matchesSearch;
+      return matchesMode && matchesCategory && matchesSearch;
     });
-  }, [products, catalogTypeFilter, selectedCategoryId, searchQuery]);
+
+    if (filterMode === 'CHEAPEST') {
+      return [...matching].sort((a, b) => a.price - b.price);
+    }
+
+    return matching;
+  }, [products, filterMode, selectedCategoryId, searchQuery]);
 
   const totalSlides = Math.max(
     1,
@@ -106,25 +111,16 @@ export default function ShopTabView({
       ref={topCatalogRef}
       className="max-w-5xl mx-auto px-4 pt-5 pb-10 space-y-5"
     >
-      {/* Header Halaman Shop (Gaya Gambar 2 Tengah) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Header Halaman Shop (Bersih & Estetik — Gaya Gambar 2 Tengah) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F2A1D] tracking-tight">
-            Katalog Produk
+            Katalog Produk Digital
           </h1>
           <p className="text-xs text-[#6B9071]">
-            Menampilkan {filteredProducts.length} produk digital &amp; langganan siap pesan
+            Menampilkan {filteredProducts.length} produk siap unduh dengan pengiriman instan
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={onOpenSubGuide}
-          className="self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#E3EED4] hover:bg-[#AEC3B0]/60 text-[#0F2A1D] text-xs font-bold transition-colors"
-        >
-          <Info className="w-3.5 h-3.5 text-[#375534]" />
-          <span>Cara Beli Produk Langganan</span>
-        </button>
       </div>
 
       {/* Kolom Pencarian Kapsul */}
@@ -134,7 +130,7 @@ export default function ShopTabView({
           type="text"
           value={searchQuery}
           onChange={(e) => onChangeSearchQuery(e.target.value)}
-          placeholder="Cari nama produk, e-book, template, atau langganan..."
+          placeholder="Cari e-book, template Excel, slide PPT, atau produk lainnya..."
           className="w-full pl-11 pr-10 py-3.5 rounded-full bg-white border border-[#AEC3B0]/60 text-xs sm:text-sm text-[#0F2A1D] placeholder:text-[#6B9071] focus:outline-none focus:border-[#375534] rf-card-shadow transition-all"
         />
         {searchQuery && (
@@ -148,13 +144,13 @@ export default function ShopTabView({
         )}
       </div>
 
-      {/* Filter Tipe Katalog (Semua | File Instan | Langganan) */}
+      {/* Filter Cepat (Semua Produk | Sedang Diskon | Harga Termurah) */}
       <div className="grid grid-cols-3 gap-2 bg-[#E3EED4]/65 p-1.5 rounded-full border border-[#AEC3B0]/50">
         <button
           type="button"
-          onClick={() => onChangeCatalogType('ALL')}
+          onClick={() => onChangeFilterMode('ALL')}
           className={
-            catalogTypeFilter === 'ALL'
+            filterMode === 'ALL'
               ? 'py-2 px-3 rounded-full text-xs font-extrabold bg-[#0F2A1D] text-white shadow-xs transition-all'
               : 'py-2 px-3 rounded-full text-xs font-bold text-[#375534] hover:text-[#0F2A1D] transition-all'
           }
@@ -163,25 +159,25 @@ export default function ShopTabView({
         </button>
         <button
           type="button"
-          onClick={() => onChangeCatalogType('INSTAN')}
+          onClick={() => onChangeFilterMode('DISCOUNT')}
           className={
-            catalogTypeFilter === 'INSTAN'
+            filterMode === 'DISCOUNT'
               ? 'py-2 px-3 rounded-full text-xs font-extrabold bg-[#375534] text-white shadow-xs transition-all'
               : 'py-2 px-3 rounded-full text-xs font-bold text-[#375534] hover:text-[#0F2A1D] transition-all'
           }
         >
-          ⚡ File Instan
+          🔥 Sedang Promo
         </button>
         <button
           type="button"
-          onClick={() => onChangeCatalogType('LANGGANAN')}
+          onClick={() => onChangeFilterMode('CHEAPEST')}
           className={
-            catalogTypeFilter === 'LANGGANAN'
+            filterMode === 'CHEAPEST'
               ? 'py-2 px-3 rounded-full text-xs font-extrabold bg-[#375534] text-white shadow-xs transition-all'
               : 'py-2 px-3 rounded-full text-xs font-bold text-[#375534] hover:text-[#0F2A1D] transition-all'
           }
         >
-          👑 Langganan
+          💰 Termurah
         </button>
       </div>
 
@@ -240,7 +236,7 @@ export default function ShopTabView({
           <button
             type="button"
             onClick={() => {
-              onChangeCatalogType('ALL');
+              onChangeFilterMode('ALL');
               onChangeCategoryId('ALL');
               onChangeSearchQuery('');
             }}
@@ -253,7 +249,7 @@ export default function ShopTabView({
         <div className="space-y-6">
           <AnimatePresence mode="wait">
             <motion.div
-              key={`shop-slide-${currentSlide}-${catalogTypeFilter}-${selectedCategoryId}-${searchQuery}`}
+              key={`shop-slide-${currentSlide}-${filterMode}-${selectedCategoryId}-${searchQuery}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -263,6 +259,7 @@ export default function ShopTabView({
               {paginatedProducts.map((product) => {
                 const info = getProductCardInfo(product);
                 const isAdded = addedProductId === product.id;
+                const isFav = favoriteIds.includes(product.id);
 
                 return (
                   <motion.div
@@ -270,34 +267,45 @@ export default function ShopTabView({
                     whileHover={{ y: -3 }}
                     className="bg-white rounded-[24px] p-2.5 sm:p-3.5 border border-[#AEC3B0]/35 rf-card-shadow flex flex-col justify-between group"
                   >
-                    <div
-                      onClick={() => onSelectProduct(product)}
-                      className="cursor-pointer"
-                    >
-                      <div className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3">
+                    <div>
+                      <div
+                        onClick={() => onSelectProduct(product)}
+                        className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3 cursor-pointer"
+                      >
                         <img
                           src={info.coverThumb}
                           alt={product.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
 
-                        <span
-                          className={
-                            info.isSubscription
-                              ? 'absolute top-2 left-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#0F2A1D] text-[#E3EED4]'
-                              : 'absolute top-2 left-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4]/95 text-[#0F2A1D] border border-[#AEC3B0]/60'
-                          }
-                        >
-                          {info.isSubscription
-                            ? '👑 Langganan'
-                            : product.badge || '⚡ Instan'}
-                        </span>
-
-                        {info.hasDiscount && info.savePercent > 0 && (
-                          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white">
-                            -{info.savePercent}%
+                        {info.hasDiscount && info.savePercent > 0 ? (
+                          <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#375534] text-white shadow-2xs">
+                            Hemat {info.savePercent}%
                           </span>
-                        )}
+                        ) : product.badge ? (
+                          <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#E3EED4]/95 text-[#0F2A1D] border border-[#AEC3B0]/60">
+                            {product.badge}
+                          </span>
+                        ) : null}
+
+                        {/* Tombol Hati Favorit di Kanan Atas */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFavorite(product.id);
+                          }}
+                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#0F2A1D] flex items-center justify-center shadow-xs transition-transform active:scale-90"
+                          aria-label="Simpan ke Favorit"
+                        >
+                          <Heart
+                            className={
+                              isFav
+                                ? 'w-4 h-4 fill-[#375534] text-[#375534]'
+                                : 'w-4 h-4 text-[#0F2A1D]'
+                            }
+                          />
+                        </button>
 
                         {info.thumbList.length > 1 && (
                           <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0F2A1D]/75 text-white inline-flex items-center gap-1">
@@ -307,7 +315,10 @@ export default function ShopTabView({
                         )}
                       </div>
 
-                      <div className="px-1">
+                      <div
+                        onClick={() => onSelectProduct(product)}
+                        className="px-1 cursor-pointer"
+                      >
                         <h2 className="font-extrabold text-xs sm:text-sm text-[#0F2A1D] line-clamp-2 leading-snug mb-1 group-hover:text-[#375534] transition-colors">
                           {product.title}
                         </h2>
@@ -338,11 +349,7 @@ export default function ShopTabView({
                             ? 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#375534] text-white flex items-center justify-center shrink-0 shadow-sm'
                             : 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] flex items-center justify-center shrink-0 shadow-sm transition-colors'
                         }
-                        title={
-                          info.isSubscription
-                            ? 'Pilih Opsi Beli Langganan'
-                            : 'Tambah ke Keranjang'
-                        }
+                        title="Tambah ke Keranjang"
                       >
                         {isAdded ? (
                           <Check className="w-4 h-4 stroke-[2.5]" />
