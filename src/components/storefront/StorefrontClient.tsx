@@ -303,7 +303,7 @@ export default function StorefrontClient({
             <img
               src={LOGO_PATH}
               alt={settings.store_name}
-              className="h-9 w-9 object-contain shrink-0"
+              className="h-9 w-9 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
             />
             <span className="font-extrabold text-base sm:text-lg text-[#0F2A1D] truncate">
               {settings.store_name}

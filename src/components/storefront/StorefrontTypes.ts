@@ -28,7 +28,7 @@ export type ShopFilterMode = 'ALL' | 'DISCOUNT' | 'CHEAPEST';
 export const CART_STORAGE_KEY = 'rizzflow_cart_v1';
 export const PRODUCTS_PER_SLIDE = 6;
 export const VISIBLE_CATEGORY_LIMIT = 5;
-export const LOGO_PATH = '/logo.png?v=3';
+export const LOGO_PATH = '/logo.jpg?v=4';
 
 export const OLD_DEFAULT_DESC =
   'Temukan template Excel, PPT, dan aset desain siap pakai untuk mempercepat produktivitasmu.';

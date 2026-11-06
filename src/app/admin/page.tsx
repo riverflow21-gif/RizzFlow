@@ -498,7 +498,7 @@ export default function AdminDashboardPage() {
           <img
     src={ADMIN_LOGO_PATH}
     alt="Logo"
-    className="h-9 w-9 object-contain shrink-0"
+    className="h-9 w-9 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
   />
           <span className="font-extrabold text-sm text-white truncate">
             Admin {settings.store_name}
@@ -530,7 +530,7 @@ export default function AdminDashboardPage() {
                   <img
                     src={ADMIN_LOGO_PATH}
                     alt="Logo"
-                    className="h-9 w-9 rounded-xl object-contain bg-white p-0.5"
+                    className="h-9 w-9 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
                   />
                   <div className="min-w-0">
                     <div className="font-extrabold text-sm text-white truncate">
@@ -575,7 +575,7 @@ export default function AdminDashboardPage() {
               <img
                 src={ADMIN_LOGO_PATH}
                 alt={settings.store_name}
-                className="h-10 w-10 rounded-xl object-contain bg-white p-0.5 shrink-0"
+                className="h-10 w-10 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
               />
               <div className="min-w-0">
                 <div className="font-extrabold text-base text-white truncate">

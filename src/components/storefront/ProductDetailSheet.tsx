@@ -175,7 +175,7 @@ export default function ProductDetailSheet({
                 <img
                   src={LOGO_PATH}
                   alt={storeName}
-                  className="w-9 h-9 object-contain shrink-0"
+                  className="w-9 h-9 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
                 />
                 <div className="min-w-0">
                   <div className="flex items-center gap-1">

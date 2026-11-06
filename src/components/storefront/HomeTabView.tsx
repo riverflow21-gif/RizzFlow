@@ -86,10 +86,10 @@ export default function HomeTabView({
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
-                src={LOGO_PATH}
-                alt={settings.store_name}
-                className="h-11 w-11 rounded-2xl object-contain bg-white/95 p-0.5 border border-[#6B9071]/50 shrink-0 shadow-xs"
-              />
+  src={LOGO_PATH}
+  alt={settings.store_name}
+  className="h-11 w-11 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
+/>
               <div className="min-w-0">
                 <span className="block font-extrabold text-base sm:text-lg tracking-tight text-white truncate">
                   {settings.store_name}
