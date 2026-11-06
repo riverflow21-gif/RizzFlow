@@ -17,38 +17,110 @@ interface CheckoutRequestBody {
   items?: CheckoutRequestItem[];
 }
 
+/**
+ * Memvalidasi email pelanggan:
+ * - Wajib diisi
+ * - Mendukung semua penyedia email (@gmail.com, @yahoo.com, @outlook.com, @domain.co.id, dll.)
+ * - Mengecek kebenaran penulisan domain setelah tanda '@'
+ */
+function validateEmailFormat(rawEmail: string): {
+  valid: boolean;
+  message: string;
+} {
+  if (!rawEmail) {
+    return {
+      valid: false,
+      message: 'Alamat email wajib diisi terlebih dahulu.',
+    };
+  }
+
+  if (rawEmail.includes(' ')) {
+    return {
+      valid: false,
+      message: 'Alamat email tidak boleh mengandung spasi.',
+    };
+  }
+
+  const parts = rawEmail.split('@');
+  if (parts.length !== 2) {
+    return {
+      valid: false,
+      message: 'Alamat email harus mengandung tepat satu tanda "@".',
+    };
+  }
+
+  const localPart = parts[0];
+  const domainPart = parts[1];
+
+  if (!localPart || localPart.length < 1) {
+    return {
+      valid: false,
+      message: 'Penulisan nama email sebelum tanda "@" belum lengkap.',
+    };
+  }
+
+  if (
+    !domainPart ||
+    !domainPart.includes('.') ||
+    domainPart.startsWith('.') ||
+    domainPart.endsWith('.') ||
+    domainPart.startsWith('-') ||
+    domainPart.endsWith('-') ||
+    domainPart.includes('..')
+  ) {
+    return {
+      valid: false,
+      message:
+        'Penulisan domain email setelah tanda "@" belum tepat (contoh: nama@gmail.com atau nama@yahoo.com).',
+    };
+  }
+
+  const domainLabels = domainPart.split('.');
+  const topLevelDomain = domainLabels[domainLabels.length - 1];
+
+  if (!topLevelDomain || topLevelDomain.length < 2) {
+    return {
+      valid: false,
+      message:
+        'Akhiran domain email setelah tanda "@" tidak valid (contoh: .com, .id, .co.id).',
+    };
+  }
+
+  for (const label of domainLabels) {
+    if (!label || label.length === 0) {
+      return {
+        valid: false,
+        message: 'Penulisan domain email setelah tanda "@" belum benar.',
+      };
+    }
+  }
+
+  return { valid: true, message: 'OK' };
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as CheckoutRequestBody;
     const rawEmail = (body.customer_email || '').trim().toLowerCase();
     const items = Array.isArray(body.items) ? body.items : [];
 
-    // Validasi email bersih yang bebas bug karakter backslash
-    const atIndex = rawEmail.indexOf('@');
-    const dotIndex = rawEmail.lastIndexOf('.');
-    const isValidEmail =
-      rawEmail.length >= 5 &&
-      !rawEmail.includes(' ') &&
-      atIndex > 0 &&
-      dotIndex > atIndex + 1 &&
-      dotIndex < rawEmail.length - 1;
-
-    if (!isValidEmail) {
-      return NextResponse.json(
-        { error: 'Mohon periksa kembali penulisan alamat email kamu.' },
-        { status: 400 }
-      );
+    // 1. Validasi Email (Hanya menolak jika email kosong atau domain setelah @ salah)
+    const emailCheck = validateEmailFormat(rawEmail);
+    if (!emailCheck.valid) {
+      return NextResponse.json({ error: emailCheck.message }, { status: 400 });
     }
 
     if (items.length === 0) {
       return NextResponse.json(
-        { error: 'Keranjang belanja masih kosong.' },
+        { error: 'Keranjang belanja kamu masih kosong.' },
         { status: 400 }
       );
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const productIds = items.map((i) => i.product_id);
+    const productIds = items
+      .map((i) => i.product_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
     const { data: dbProducts, error: prodError } = await supabaseAdmin
       .from('products')
@@ -63,11 +135,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const productMap = new Map<string, Product>();
-    for (const p of dbProducts as Product[]) {
-      productMap.set(p.id, p);
-    }
-
+    const productList = dbProducts as Product[];
     let subtotalAmount = 0;
     const orderItemsPayload: {
       product_id: string;
@@ -78,7 +146,7 @@ export async function POST(request: Request) {
     }[] = [];
 
     for (const reqItem of items) {
-      const prod = productMap.get(reqItem.product_id);
+      const prod = productList.find((p) => p.id === reqItem.product_id);
       if (!prod) continue;
       const qty = Math.max(1, Number(reqItem.quantity) || 1);
       const itemTotal = prod.price * qty;
@@ -100,11 +168,15 @@ export async function POST(request: Request) {
       );
     }
 
+    // 2. Kode Promo 100% Opsional (Tidak pernah menolak checkout meskipun kosong/tidak valid)
     let discountAmount = 0;
     let appliedPromoCode: string | null = null;
 
-    if (body.promo_code && body.promo_code.trim().length > 0) {
-      const cleanPromo = body.promo_code.trim().toUpperCase();
+    const optionalPromo =
+      typeof body.promo_code === 'string' ? body.promo_code.trim() : '';
+
+    if (optionalPromo.length > 0) {
+      const cleanPromo = optionalPromo.toUpperCase();
       const { data: promoData } = await supabaseAdmin
         .from('promo_codes')
         .select('*')
@@ -171,7 +243,6 @@ export async function POST(request: Request) {
 
     await supabaseAdmin.from('order_items').insert(itemsWithOrderId);
 
-    // Kirim Notifikasi Telegram ke Admin
     const productSummary = orderItemsPayload
       .map((i) => `• ${i.product_title} (x${i.quantity})`)
       .join('\n');

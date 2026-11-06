@@ -8,7 +8,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export function getSupabaseAdmin() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('Konfigurasi SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum lengkap');
+    throw new Error(
+      'Konfigurasi SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum lengkap'
+    );
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
@@ -19,7 +21,9 @@ export function getSupabaseAdmin() {
   });
 }
 
-export async function generateProductSignedUrl(filePath: string): Promise<string> {
+export async function generateProductSignedUrl(
+  filePath: string
+): Promise<string> {
   const supabaseAdmin = getSupabaseAdmin();
   const expiresInSeconds = 60 * 60 * 24 * 7; // Berlaku 7 Hari
 
@@ -31,7 +35,9 @@ export async function generateProductSignedUrl(filePath: string): Promise<string
 
   if (error || !data?.signedUrl) {
     throw new Error(
-      `Gagal membuat link unduhan untuk file ${filePath}: ${error?.message || 'Tidak diketahui'}`
+      `Gagal membuat link unduhan untuk file ${filePath}: ${
+        error?.message || 'Tidak diketahui'
+      }`
     );
   }
 
@@ -64,7 +70,9 @@ export interface ProductDeliverables {
   original_price?: number | null;
 }
 
-export function parseProductDeliverables(rawFilePath: string): ProductDeliverables {
+export function parseProductDeliverables(
+  rawFilePath: string
+): ProductDeliverables {
   if (!rawFilePath) {
     return { files: [], links: [], original_price: null };
   }
@@ -151,7 +159,7 @@ export async function buildProductDeliveryItems(params: {
 }
 
 // ============================================================================
-// PENYIMPANAN PESAN, KONFIGURASI LAYANAN KUSTOM, & TRANSAKSI PROYEK KUSTOM
+// PENYIMPANAN PESAN, LAYANAN KUSTOM, & NOTIFIKASI TELEGRAM (ADMIN & KLIEN)
 // ============================================================================
 
 export interface CustomerSupportMessage {
@@ -192,8 +200,11 @@ export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
   telegram_chat_id: '',
 };
 
+export type CustomNotificationChannel = 'EMAIL' | 'TELEGRAM' | 'BOTH';
+
 export type CustomOrderStatus =
   | 'MENUNGGU_PENGERJAAN'
+  | 'DIPROSES'
   | 'SIAP_DIBAYAR'
   | 'LUNAS'
   | 'DIBATALKAN';
@@ -204,12 +215,15 @@ export interface CustomProjectOrder {
   customer_name: string;
   customer_email: string;
   customer_contact: string;
+  customer_telegram_id?: string;
+  notify_channel?: CustomNotificationChannel;
   project_title: string;
   request_details: string;
-  price: number; // Diisi Admin saat produk selesai
+  estimated_completion?: string; // Estimasi pengerjaan sampai selesai
+  price: number;
   admin_note: string;
-  file_paths: string[]; // File yang diunggah Admin
-  delivery_links: string[]; // Link hasil pengerjaan dari Admin
+  file_paths: string[];
+  delivery_links: string[];
   status: CustomOrderStatus;
   payment_status: 'UNPAID' | 'PENDING' | 'PAID';
   qris_string: string | null;
@@ -222,7 +236,9 @@ const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
 const CUSTOM_SERVICES_STORAGE_FILE = '__rizzflow_custom_services.json';
 const CUSTOM_ORDERS_STORAGE_FILE = '__rizzflow_custom_project_orders.json';
 
-export async function getStoredCustomerMessages(): Promise<CustomerSupportMessage[]> {
+export async function getStoredCustomerMessages(): Promise<
+  CustomerSupportMessage[]
+> {
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.storage
@@ -295,7 +311,9 @@ export async function saveStoredCustomServiceConfig(
     });
 }
 
-export async function getStoredCustomProjectOrders(): Promise<CustomProjectOrder[]> {
+export async function getStoredCustomProjectOrders(): Promise<
+  CustomProjectOrder[]
+> {
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.storage
@@ -326,10 +344,11 @@ export async function saveStoredCustomProjectOrders(
 }
 
 /**
- * Mengirimkan notifikasi instan ke Telegram Admin.
- * Mengambil token dari pengaturan Admin atau dari environment variables Vercel.
+ * Mengirimkan notifikasi aktivitas klien ke Telegram Admin.
  */
-export async function sendAdminTelegramNotification(messageText: string): Promise<void> {
+export async function sendAdminTelegramNotification(
+  messageText: string
+): Promise<void> {
   try {
     const cfg = await getStoredCustomServiceConfig();
     const botToken = (
@@ -355,6 +374,47 @@ export async function sendAdminTelegramNotification(messageText: string): Promis
       }),
     });
   } catch (e) {
-    console.error('Gagal mengirim notifikasi Telegram:', e);
+    console.error('Gagal mengirim notifikasi Telegram Admin:', e);
+  }
+}
+
+/**
+ * Mengirimkan notifikasi update pesanan Layanan Kustom langsung ke Telegram Klien
+ * melalui bot https://t.me/RizzFlow_Notif_bot
+ */
+export async function sendClientTelegramNotification(
+  clientChatId: string,
+  messageText: string
+): Promise<boolean> {
+  try {
+    const cleanChatId = (clientChatId || '').trim();
+    if (!cleanChatId) return false;
+
+    const cfg = await getStoredCustomServiceConfig();
+    const botToken = (
+      cfg.telegram_bot_token ||
+      process.env.TELEGRAM_BOT_TOKEN ||
+      ''
+    ).trim();
+
+    if (!botToken) return false;
+
+    const res = await fetch(
+      `https://api.telegram.org/bot${botToken}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: cleanChatId,
+          text: messageText,
+          parse_mode: 'Markdown',
+        }),
+      }
+    );
+
+    return res.ok;
+  } catch (e) {
+    console.error('Gagal mengirim notifikasi Telegram Klien:', e);
+    return false;
   }
 }

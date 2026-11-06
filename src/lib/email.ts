@@ -7,19 +7,23 @@ export interface PurchasedFileLink {
 }
 
 function createGmailTransporter() {
-  const gmailUser = process.env.GMAIL_USER;
+  const gmailUser = (process.env.GMAIL_USER || '').trim();
   const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || '')
     .split(' ')
-    .join('');
+    .join('')
+    .trim();
 
   if (!gmailUser || !gmailAppPassword) {
+    console.warn('GMAIL_USER atau GMAIL_APP_PASSWORD belum dikonfigurasi.');
     return null;
   }
 
   return {
     gmailUser,
     transporter: nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
       auth: {
         user: gmailUser,
         pass: gmailAppPassword,
@@ -37,6 +41,9 @@ export async function sendProductDeliveryEmail(params: {
   totalPaid: number;
   files: PurchasedFileLink[];
 }): Promise<void> {
+  const cleanEmail = (params.toEmail || '').trim();
+  if (!cleanEmail || !cleanEmail.includes('@')) return;
+
   const mailSetup = createGmailTransporter();
   if (!mailSetup) return;
 
@@ -91,7 +98,7 @@ export async function sendProductDeliveryEmail(params: {
   await mailSetup.transporter.sendMail({
     from: `"RizzFlow" <${mailSetup.gmailUser}>`,
     replyTo: mailSetup.gmailUser,
-    to: params.toEmail,
+    to: cleanEmail,
     subject: `Pesanan RizzFlow kamu sudah siap diakses (${params.invoiceNumber})`,
     text: plainTextContent,
     html: htmlContent,
@@ -103,23 +110,31 @@ export async function sendProductDeliveryEmail(params: {
 }
 
 /**
- * Mengirimkan email untuk Transaksi Layanan Kustom:
- * - CREATED: Mengirim Kode Pesanan Kustom saat pelanggan baru memesan.
- * - BILL_READY: Mengabari bahwa produk kustom sudah selesai & siap dibayar dengan Kode Pesanan.
+ * Mengirimkan email untuk setiap tahapan Transaksi Layanan Kustom:
+ * - CREATED: Mengirim Kode Pesanan Kustom (KST-XXXX) saat klien baru memesan.
+ * - ACCEPTED_ESTIMATE: Jawaban sementara Admin bahwa pesanan diterima & sedang diproses + estimasi selesai.
+ * - BILL_READY: Memberitahu bahwa pesanan telah selesai dikerjakan & silakan lakukan pembayaran tagihan.
  * - PAID_DELIVERY: Mengirim file produk kustom setelah tagihan dibayar lunas.
  */
 export async function sendCustomOrderEmail(params: {
-  type: 'CREATED' | 'BILL_READY' | 'PAID_DELIVERY';
+  type: 'CREATED' | 'ACCEPTED_ESTIMATE' | 'BILL_READY' | 'PAID_DELIVERY';
   toEmail: string;
   customerName: string;
   orderCode: string;
   projectTitle: string;
+  estimatedCompletion?: string;
   price?: number;
   adminNote?: string;
   files?: PurchasedFileLink[];
-}): Promise<void> {
+}): Promise<boolean> {
+  const cleanEmail = (params.toEmail || '').trim();
+  // Jika klien memilih hanya menerima via Telegram, jangan kirim email
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return false;
+  }
+
   const mailSetup = createGmailTransporter();
-  if (!mailSetup) return;
+  if (!mailSetup) return false;
 
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL || 'https://rizzflow-theta.vercel.app';
@@ -131,16 +146,27 @@ export async function sendCustomOrderEmail(params: {
   if (params.type === 'CREATED') {
     subject = `Kode Pesanan Layanan Kustom RizzFlow kamu: ${params.orderCode}`;
     headline = 'Permintaan Layanan Kustom Kamu Telah Kami Terima';
-    bodyParagraph = `Terima kasih telah memesan layanan kustom di RizzFlow. Simpan Kode Pesanan kamu: ${params.orderCode}. Begitu produk kustom kamu selesai dikerjakan, kami akan mengirimkan email pemberitahuan dan kamu bisa mengakses serta membayarnya menggunakan kode tersebut.`;
+    bodyParagraph = `Terima kasih telah memesan layanan kustom "${params.projectTitle}" di RizzFlow. Simpan Kode Pesanan kamu: ${params.orderCode}. Kamu dapat mengecek progres pengerjaan, estimasi selesai, dan melakukan pembayaran nantinya menggunakan kode tersebut di menu Layanan website RizzFlow.`;
+  } else if (params.type === 'ACCEPTED_ESTIMATE') {
+    subject = `Pesanan Kustom ${params.orderCode} Diterima dan Sedang Diproses`;
+    headline = 'Pesanan Kamu Diterima & Sedang Kami Kerjakan!';
+    bodyParagraph = `Admin RizzFlow telah menerima dan mulai memproses pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode}.`;
   } else if (params.type === 'BILL_READY') {
-    subject = `Pesanan Kustom ${params.orderCode} Sudah Selesai dan Siap Diakses`;
+    subject = `Pesanan Kustom ${params.orderCode} Telah Selesai - Silakan Lakukan Pembayaran`;
     headline = 'Produk Kustom Kamu Sudah Selesai Dikerjakan!';
-    bodyParagraph = `Kabar gembira! Pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode} telah selesai kami siapkan dengan total tagihan Rp${(params.price || 0).toLocaleString('id-ID')}. Silakan buka menu Layanan di website RizzFlow lalu masukkan kode ${params.orderCode} untuk menyelesaikan pembayaran QRIS dan mengunduh produkmu.`;
+    bodyParagraph = `Kabar gembira! Pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode} telah selesai kami siapkan dengan total tagihan Rp${(params.price || 0).toLocaleString('id-ID')}. Silakan buka menu Layanan di website RizzFlow, masukkan kode ${params.orderCode}, dan lakukan pembayaran via QRIS agar file produkmu langsung terkirim otomatis.`;
   } else {
     subject = `File Produk Kustom RizzFlow Kamu (${params.orderCode})`;
-    headline = 'Pembayaran Lunas — Berikut File Produk Kustom Kamu';
-    bodyParagraph = `Terima kasih! Pembayaran untuk pesanan kustom ${params.orderCode} telah kami terima. Silakan unduh hasil pengerjaan produk kustom kamu melalui tombol di bawah ini:`;
+    headline = 'Pembayaran Berhasil — Berikut Produk Kustom Kamu';
+    bodyParagraph = `Terima kasih! Pembayaran untuk pesanan kustom ${params.orderCode} telah kami terima. Silakan akses dan unduh produk kustom kamu melalui tombol di bawah ini:`;
   }
+
+  const estimateHtml = params.estimatedCompletion
+    ? `<div style="padding: 12px 14px; background-color: #E3EED4; border: 1px solid #375534; border-radius: 10px; margin: 12px 0; font-size: 13px; color: #0F2A1D;">
+        <strong>⏱️ Estimasi Pengerjaan Sampai Selesai:</strong><br/>
+        <span style="font-size: 15px; font-weight: 800; color: #375534;">${params.estimatedCompletion}</span>
+       </div>`
+    : '';
 
   const filesHtml =
     params.files && params.files.length > 0
@@ -162,29 +188,36 @@ export async function sendCustomOrderEmail(params: {
     `${headline}\n` +
     `Kode Pesanan Kustom: ${params.orderCode}\n\n` +
     `${bodyParagraph}\n\n` +
-    (params.adminNote ? `Catatan Admin:\n${params.adminNote}\n\n` : '') +
-    `Buka Website RizzFlow: ${appUrl}\n\n` +
+    (params.estimatedCompletion
+      ? `Estimasi Pengerjaan Sampai Selesai: ${params.estimatedCompletion}\n\n`
+      : '') +
+    (params.price && params.price > 0
+      ? `Total Tagihan: Rp${params.price.toLocaleString('id-ID')}\n\n`
+      : '') +
+    (params.adminNote ? `Pesan / Catatan Admin:\n${params.adminNote}\n\n` : '') +
+    `Cek Kode Pesanan di Website RizzFlow: ${appUrl}\n\n` +
     `Salam hangat,\nTim RizzFlow`;
 
   const htmlContent = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; margin: 0 auto; padding: 22px; color: #0F2A1D; background-color: #FFFFFF; border: 1px solid #AEC3B0; border-radius: 16px;">
       <p style="font-size: 15px; margin-top: 0;">Halo <strong>${params.customerName}</strong>,</p>
-      <div style="padding: 14px 16px; border-radius: 12px; background-color: #E3EED4; border: 1px solid #6B9071; margin-bottom: 14px;">
-        <span style="font-size: 11px; color: #375534; font-weight: 800;">KODE PESANAN LAYANAN KUSTOM</span>
-        <div style="font-size: 22px; font-weight: 800; color: #0F2A1D; letter-spacing: 1px; margin-top: 2px;">${params.orderCode}</div>
+      <div style="padding: 14px 16px; border-radius: 12px; background-color: #0F2A1D; color: #E3EED4; margin-bottom: 14px;">
+        <span style="font-size: 11px; color: #AEC3B0; font-weight: 800;">KODE PESANAN LAYANAN KUSTOM KAMU</span>
+        <div style="font-size: 24px; font-weight: 800; color: #FFFFFF; letter-spacing: 1.5px; margin-top: 2px;">${params.orderCode}</div>
       </div>
       <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #0F2A1D;">${headline}</h3>
       <p style="font-size: 14px; line-height: 1.6; color: #375534;">${bodyParagraph}</p>
+      ${estimateHtml}
       ${
         params.adminNote
           ? `<div style="padding: 12px; background-color: #F6F8F3; border: 1px solid #AEC3B0; border-radius: 10px; margin: 12px 0; font-size: 13px; color: #0F2A1D;">
-              <strong>Catatan Admin:</strong><br/>${params.adminNote}
+              <strong>Keterangan Admin:</strong><br/>${params.adminNote}
              </div>`
           : ''
       }
       ${filesHtml}
       <p style="font-size: 12px; color: #6B9071; margin-top: 18px; border-top: 1px solid #E3EED4; padding-top: 12px;">
-        Akses halaman Layanan Kustom di <a href="${appUrl}" style="color: #375534; font-weight: 700;">RizzFlow</a> dan masukkan kode <strong>${params.orderCode}</strong>.
+        Buka menu <strong>Layanan</strong> di <a href="${appUrl}" style="color: #375534; font-weight: 700;">${appUrl}</a> dan masukkan kode <strong>${params.orderCode}</strong> untuk melihat status atau menyelesaikan pembayaran.
       </p>
     </div>
   `;
@@ -192,7 +225,7 @@ export async function sendCustomOrderEmail(params: {
   await mailSetup.transporter.sendMail({
     from: `"RizzFlow" <${mailSetup.gmailUser}>`,
     replyTo: mailSetup.gmailUser,
-    to: params.toEmail,
+    to: cleanEmail,
     subject,
     text: plainText,
     html: htmlContent,
@@ -201,4 +234,6 @@ export async function sendCustomOrderEmail(params: {
       Importance: 'high',
     },
   });
+
+  return true;
 }

@@ -21,6 +21,7 @@ import {
   Clock,
   ExternalLink,
 } from 'lucide-react';
+import { CustomNotificationChannel } from '@/lib/supabase';
 import {
   CustomServiceConfig,
   CustomProjectOrder,
@@ -48,6 +49,8 @@ type NullableNumber = number | null;
 type NullableCustomOrder = CustomProjectOrder | null;
 type NullableString = string | null;
 
+const NOTIF_BOT_URL = 'https://t.me/RizzFlow_Notif_bot';
+
 export default function ServicesTabView({
   customService,
   storeName,
@@ -74,8 +77,12 @@ export default function ServicesTabView({
   const [msgType, setMsgType] = useState(
     'LAYANAN_KHUSUS' as MessageCategoryType
   );
+  const [notifyChannel, setNotifyChannel] = useState(
+    'EMAIL' as CustomNotificationChannel
+  );
   const [senderName, setSenderName] = useState('');
   const [senderEmail, setSenderEmail] = useState('');
+  const [customerTelegramId, setCustomerTelegramId] = useState('');
   const [senderContact, setSenderContact] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -97,7 +104,6 @@ export default function ServicesTabView({
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // Cek Kode Pesanan Kustom (KST-XXXX)
   const handleCheckCustomOrder = async (
     e?: React.FormEvent,
     overrideCode?: string
@@ -145,7 +151,6 @@ export default function ServicesTabView({
     }
   };
 
-  // Buat QRIS Tagihan Layanan Kustom
   const handleGenerateCustomQris = async (orderCode: string) => {
     setIsProcessingBill(true);
     setCheckError(null);
@@ -180,7 +185,6 @@ export default function ServicesTabView({
     }
   };
 
-  // Konfirmasi / Simulasi Pelunasan Tagihan Kustom -> Buka & Kirim File Otomatis
   const handleConfirmCustomPayment = async (orderCode: string) => {
     setIsProcessingBill(true);
     setCheckError(null);
@@ -215,7 +219,6 @@ export default function ServicesTabView({
     }
   };
 
-  // Kirim Pesan / Buat Pesanan Layanan Kustom Baru
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedback(null);
@@ -229,8 +232,18 @@ export default function ServicesTabView({
         body: JSON.stringify({
           action: 'SEND_MESSAGE',
           type: msgType,
+          notify_channel:
+            msgType === 'LAYANAN_KHUSUS' ? notifyChannel : 'EMAIL',
           sender_name: senderName,
-          sender_email: senderEmail,
+          sender_email:
+            msgType === 'LAYANAN_KHUSUS' && notifyChannel === 'TELEGRAM'
+              ? ''
+              : senderEmail,
+          customer_telegram_id:
+            msgType === 'LAYANAN_KHUSUS' &&
+            (notifyChannel === 'TELEGRAM' || notifyChannel === 'BOTH')
+              ? customerTelegramId
+              : '',
           sender_contact: senderContact,
           project_title:
             msgType === 'LAYANAN_KHUSUS'
@@ -283,6 +296,15 @@ export default function ServicesTabView({
     }
   };
 
+  const needsEmailInput =
+    msgType !== 'LAYANAN_KHUSUS' ||
+    notifyChannel === 'EMAIL' ||
+    notifyChannel === 'BOTH';
+
+  const needsTelegramInput =
+    msgType === 'LAYANAN_KHUSUS' &&
+    (notifyChannel === 'TELEGRAM' || notifyChannel === 'BOTH');
+
   return (
     <div className="max-w-5xl mx-auto px-4 pt-5 pb-12 space-y-8">
       {/* ==================================================================== */}
@@ -298,13 +320,13 @@ export default function ServicesTabView({
           <div className="space-y-1.5">
             <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#375534] text-[#E3EED4] text-xs font-extrabold">
               <KeyRound className="w-3.5 h-3.5" />
-              <span>Halaman Tagihan &amp; Akses Produk Kustom</span>
+              <span>Halaman Status, Estimasi &amp; Tagihan Kustom</span>
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               Cek Kode Pesanan Layanan Kustom
             </h1>
             <p className="text-xs sm:text-sm text-[#AEC3B0] max-w-2xl leading-relaxed">
-              Sudah memesan pembuatan web sederhana, template Excel, atau jasa kustom? Masukkan <strong>Kode Pesanan (Contoh: KST-4829)</strong> yang dikirim ke emailmu untuk melihat tagihan, membayar via QRIS, dan mengunduh produk kustommu.
+              Masukkan <strong>Kode Pesanan (Contoh: KST-4829)</strong> yang kamu terima di Email atau Bot Telegram untuk melihat estimasi pengerjaan, membayar tagihan QRIS saat pesanan selesai, dan mengunduh produkmu.
             </p>
           </div>
 
@@ -331,7 +353,7 @@ export default function ServicesTabView({
               disabled={isCheckingCode || !orderCodeInput.trim()}
               className="px-7 py-3.5 rounded-full bg-[#E3EED4] hover:bg-white disabled:bg-[#375534] disabled:text-[#AEC3B0] text-[#0F2A1D] font-extrabold text-xs sm:text-sm transition-all shrink-0 shadow-sm"
             >
-              {isCheckingCode ? 'Mencari...' : 'Buka Tagihan / Pesanan'}
+              {isCheckingCode ? 'Mencari...' : 'Buka Status & Tagihan'}
             </motion.button>
           </form>
 
@@ -345,7 +367,7 @@ export default function ServicesTabView({
       </section>
 
       {/* ==================================================================== */}
-      {/* HASIL PENGECEKAN KODE PESANAN KUSTOM (TAGIHAN QRIS & UNDUH PRODUK) */}
+      {/* HASIL PENGECEKAN KODE PESANAN KUSTOM (ESTIMASI, TAGIHAN & UNDUH) */}
       {/* ==================================================================== */}
       {checkedOrder && (
         <motion.section
@@ -370,15 +392,21 @@ export default function ServicesTabView({
 
             <div className="self-start sm:self-center">
               {checkedOrder.status === 'MENUNGGU_PENGERJAAN' && (
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071] text-xs font-extrabold">
+                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Menunggu Konfirmasi Admin</span>
+                </span>
+              )}
+              {checkedOrder.status === 'DIPROSES' && (
+                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] border border-[#375534] text-xs font-extrabold">
                   <Clock className="w-3.5 h-3.5 text-[#375534]" />
-                  <span>Sedang Dikerjakan Admin</span>
+                  <span>Pesanan Diterima &amp; Sedang Diproses</span>
                 </span>
               )}
               {checkedOrder.status === 'SIAP_DIBAYAR' && (
                 <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#375534] text-white text-xs font-extrabold">
                   <QrCode className="w-3.5 h-3.5 text-[#E3EED4]" />
-                  <span>Produk Selesai — Menunggu Pembayaran</span>
+                  <span>Produk Selesai — Silakan Bayar Tagihan</span>
                 </span>
               )}
               {checkedOrder.status === 'LUNAS' && (
@@ -390,11 +418,24 @@ export default function ServicesTabView({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/50 space-y-2 text-xs sm:text-sm text-[#0F2A1D]">
+          {/* Keterangan Admin & Estimasi Pengerjaan */}
+          <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/50 space-y-2.5 text-xs sm:text-sm text-[#0F2A1D]">
+            {checkedOrder.estimated_completion && (
+              <div className="p-3 rounded-xl bg-[#E3EED4] border border-[#375534]/50">
+                <span className="text-[11px] font-extrabold uppercase text-[#375534] block">
+                  ⏱️ Estimasi Pengerjaan Sampai Selesai:
+                </span>
+                <span className="text-sm sm:text-base font-extrabold text-[#0F2A1D]">
+                  {checkedOrder.estimated_completion}
+                </span>
+              </div>
+            )}
+
             <p>
               <strong className="text-[#375534]">Keterangan Admin:</strong>{' '}
               {checkedOrder.admin_note}
             </p>
+
             {checkedOrder.price > 0 && (
               <p className="text-base font-extrabold text-[#0F2A1D] pt-1">
                 Total Tagihan Layanan Kustom:{' '}
@@ -437,11 +478,7 @@ export default function ServicesTabView({
                     })}
                   </div>
                   <p className="text-xs text-[#375534]">
-                    Begitu pembayaran selesai, file produk kustommu akan langsung terbuka di halaman ini dan dikirim ke email{' '}
-                    <strong className="text-[#0F2A1D]">
-                      {checkedOrder.customer_email}
-                    </strong>
-                    .
+                    Begitu pembayaran selesai, file produk kustommu akan langsung terbuka di halaman ini dan dikirim otomatis ke saluran notifikasi pilihanmu.
                   </p>
 
                   {isSimMode && (
@@ -474,8 +511,7 @@ export default function ServicesTabView({
 
               {unlockedFiles.length === 0 ? (
                 <p className="text-xs text-[#375534]">
-                  File produk kustom juga telah dikirimkan ke alamat email{' '}
-                  <strong>{checkedOrder.customer_email}</strong>.
+                  Pesanan kustom kamu telah selesai dan dikirimkan ke saluran notifikasi pilihanmu.
                 </p>
               ) : (
                 <div className="space-y-2.5">
@@ -506,7 +542,7 @@ export default function ServicesTabView({
       )}
 
       {/* ==================================================================== */}
-      {/* 2. KARTU DAFTAR LAYANAN KUSTOM (DIATUR DARI ADMIN) */}
+      {/* 2. KARTU DAFTAR LAYANAN KUSTOM */}
       {/* ==================================================================== */}
       <section className="rounded-[28px] bg-[#E3EED4] border border-[#AEC3B0] p-6 sm:p-7 space-y-4">
         <div className="space-y-1.5 max-w-2xl">
@@ -571,7 +607,7 @@ export default function ServicesTabView({
       </section>
 
       {/* ==================================================================== */}
-      {/* 3. FORMULIR PESAN LAYANAN KUSTOM & KLAIM GARANSI + FAQ */}
+      {/* 3. FORMULIR PESAN LAYANAN KUSTOM (DENGAN PILIHAN EMAIL / BOT TELEGRAM) */}
       {/* ==================================================================== */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div
@@ -585,10 +621,11 @@ export default function ServicesTabView({
             </h2>
           </div>
           <p className="text-xs text-[#6B9071] mb-5">
-            Saat kamu memesan Jasa Kustom, sistem otomatis memberikan <strong>Kode Pesanan (KST-XXXX)</strong> ke layar dan emailmu.
+            Khusus pesanan Layanan Kustom, kamu bebas memilih untuk menerima Kode Pesanan dan pemberitahuan tagihan melalui <strong>Email</strong> atau <strong>Bot Telegram Resmi RizzFlow</strong>.
           </p>
 
-          <form onSubmit={handleSendMessage} className="space-y-3.5">
+          <form onSubmit={handleSendMessage} className="space-y-4">
+            {/* Pilihan Kategori Formulir */}
             <div className="grid grid-cols-3 gap-2 bg-[#F6F8F3] p-1.5 rounded-full border border-[#AEC3B0]/50">
               <button
                 type="button"
@@ -625,6 +662,80 @@ export default function ServicesTabView({
               </button>
             </div>
 
+            {/* Pilihan Saluran Notifikasi Khusus Layanan Kustom (Email / Telegram / Keduanya) */}
+            {msgType === 'LAYANAN_KHUSUS' && (
+              <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 space-y-3">
+                <label className="block text-xs font-extrabold text-[#0F2A1D]">
+                  Pilih Cara Menerima Kode Pesanan &amp; Notifikasi Tagihan:
+                </label>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannel('EMAIL')}
+                    className={
+                      notifyChannel === 'EMAIL'
+                        ? 'py-2 px-2.5 rounded-xl bg-[#0F2A1D] text-[#E3EED4] text-[11px] font-extrabold'
+                        : 'py-2 px-2.5 rounded-xl bg-white border border-[#AEC3B0] text-[#0F2A1D] text-[11px] font-bold'
+                    }
+                  >
+                    📧 Via Email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannel('TELEGRAM')}
+                    className={
+                      notifyChannel === 'TELEGRAM'
+                        ? 'py-2 px-2.5 rounded-xl bg-[#0F2A1D] text-[#E3EED4] text-[11px] font-extrabold'
+                        : 'py-2 px-2.5 rounded-xl bg-white border border-[#AEC3B0] text-[#0F2A1D] text-[11px] font-bold'
+                    }
+                  >
+                    🤖 Via Telegram
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannel('BOTH')}
+                    className={
+                      notifyChannel === 'BOTH'
+                        ? 'py-2 px-2.5 rounded-xl bg-[#0F2A1D] text-[#E3EED4] text-[11px] font-extrabold'
+                        : 'py-2 px-2.5 rounded-xl bg-white border border-[#AEC3B0] text-[#0F2A1D] text-[11px] font-bold'
+                    }
+                  >
+                    📧+🤖 Keduanya
+                  </button>
+                </div>
+
+                {/* Kotak Instruksi Wajib Aktifkan Bot Telegram Jika Pilih Telegram / Keduanya */}
+                {needsTelegramInput && (
+                  <div className="p-3.5 rounded-xl bg-[#E3EED4] border border-[#375534] space-y-2 text-xs text-[#0F2A1D]">
+                    <p className="font-extrabold text-[#0F2A1D]">
+                      🤖 Wajib Aktifkan Bot Notifikasi RizzFlow Terlebih Dahulu:
+                    </p>
+                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-[#375534]">
+                      <li>
+                        Klik tombol <strong>Buka @RizzFlow_Notif_bot</strong> di bawah ini, lalu tekan tombol <strong>Start / Mulai</strong> di Telegram kamu agar bot diizinkan mengirim pesan ke kamu.
+                      </li>
+                      <li>
+                        Masukkan <strong>ID Telegram (Angka Chat ID)</strong> kamu pada kolom di bawah (bisa dilihat melalui bot atau <code>@userinfobot</code> di Telegram).
+                      </li>
+                    </ol>
+                    <div className="pt-1">
+                      <a
+                        href={NOTIF_BOT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] text-xs font-extrabold shadow-2xs transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Buka &amp; Aktifkan @RizzFlow_Notif_bot</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
                 type="text"
@@ -634,14 +745,28 @@ export default function ServicesTabView({
                 placeholder="Nama Kamu *"
                 className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
               />
-              <input
-                type="email"
-                required
-                value={senderEmail}
-                onChange={(e) => setSenderEmail(e.target.value)}
-                placeholder="Email Aktif Kamu *"
-                className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
-              />
+
+              {needsEmailInput && (
+                <input
+                  type="email"
+                  required={needsEmailInput}
+                  value={senderEmail}
+                  onChange={(e) => setSenderEmail(e.target.value)}
+                  placeholder="Alamat Email Aktif Kamu *"
+                  className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
+                />
+              )}
+
+              {needsTelegramInput && (
+                <input
+                  type="text"
+                  required={needsTelegramInput}
+                  value={customerTelegramId}
+                  onChange={(e) => setCustomerTelegramId(e.target.value)}
+                  placeholder="ID Telegram / Chat ID Kamu (Contoh: 123456789) *"
+                  className="w-full px-4 py-3 bg-[#E3EED4]/55 border border-[#375534] rounded-2xl text-xs sm:text-sm font-bold text-[#0F2A1D] focus:outline-none"
+                />
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -649,7 +774,7 @@ export default function ServicesTabView({
                 type="text"
                 value={senderContact}
                 onChange={(e) => setSenderContact(e.target.value)}
-                placeholder="Nomor WhatsApp (Agar Mudah Dihubungi)"
+                placeholder="Nomor WhatsApp (Opsional)"
                 className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
               />
 
@@ -680,13 +805,12 @@ export default function ServicesTabView({
               onChange={(e) => setMessageText(e.target.value)}
               placeholder={
                 msgType === 'KLAIM_GARANSI'
-                  ? 'Tuliskan kendalamu (misal: Pembayaran QRIS selesai tapi file belum masuk ke email)...'
+                  ? 'Tuliskan kendalamu (misal: Pembayaran QRIS selesai tapi file belum masuk)...'
                   : 'Jelaskan detail website sederhana, rumus Excel, atau produk kustom yang ingin kamu buat...'
               }
               className="w-full px-4 py-3 bg-[#F6F8F3] border border-[#AEC3B0]/60 rounded-2xl text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
             />
 
-            {/* Kotak Kode Pesanan Kustom (KST-XXXX) Saat Berhasil Memesan */}
             {createdOrderCode && (
               <div className="p-4 rounded-2xl bg-[#E3EED4] border-2 border-[#375534] text-center space-y-2">
                 <span className="text-[11px] font-extrabold text-[#375534] uppercase">
@@ -715,7 +839,7 @@ export default function ServicesTabView({
                   </button>
                 </div>
                 <p className="text-[11px] text-[#375534]">
-                  Simpan kode di atas! Saat produk selesai dikerjakan, kamu akan mendapat email dan bisa membayar tagihannya di bagian atas halaman ini.
+                  Simpan kode di atas! Pemberitahuan estimasi selesai dan tagihan akan dikirimkan sesuai saluran pilihanmu.
                 </p>
               </div>
             )}

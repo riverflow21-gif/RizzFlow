@@ -48,6 +48,68 @@ type NullableFeedback = PromoFeedback | null;
 type NullableString = string | null;
 type NullableOrder = Order | null;
 
+/**
+ * Validasi email di sisi layar Checkout:
+ * Hanya menolak jika kosong atau penulisan domain setelah '@' salah.
+ * Mendukung semua domain email (gmail.com, yahoo.com, outlook.com, kampus.ac.id, dll.)
+ */
+function checkClientEmailFormat(raw: string): {
+  valid: boolean;
+  errorText: string;
+} {
+  const email = raw.trim().toLowerCase();
+  if (!email) {
+    return {
+      valid: false,
+      errorText: 'Alamat email penerima wajib diisi terlebih dahulu.',
+    };
+  }
+  if (email.includes(' ')) {
+    return {
+      valid: false,
+      errorText: 'Alamat email tidak boleh mengandung spasi.',
+    };
+  }
+
+  const parts = email.split('@');
+  if (parts.length !== 2 || !parts[0]) {
+    return {
+      valid: false,
+      errorText:
+        'Format email belum lengkap (harus menyertakan tanda "@", contoh: nama@email.com).',
+    };
+  }
+
+  const domain = parts[1];
+  if (
+    !domain ||
+    !domain.includes('.') ||
+    domain.startsWith('.') ||
+    domain.endsWith('.') ||
+    domain.startsWith('-') ||
+    domain.endsWith('-') ||
+    domain.includes('..')
+  ) {
+    return {
+      valid: false,
+      errorText:
+        'Penulisan domain setelah tanda "@" belum benar (contoh: @gmail.com, @yahoo.com, @outlook.com).',
+    };
+  }
+
+  const domainSegments = domain.split('.');
+  const tld = domainSegments[domainSegments.length - 1];
+  if (!tld || tld.length < 2) {
+    return {
+      valid: false,
+      errorText:
+        'Akhiran domain email setelah tanda "@" kurang lengkap (contoh: .com, .id, .co.id).',
+    };
+  }
+
+  return { valid: true, errorText: '' };
+}
+
 export default function CheckoutPage() {
   const [cart, setCart] = useState([] as CartItem[]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -134,7 +196,12 @@ export default function CheckoutPage() {
 
   const handleValidatePromo = async () => {
     const cleanCode = promoInput.trim().toUpperCase();
-    if (!cleanCode) return;
+    if (!cleanCode) {
+      setAppliedPromo(null);
+      setAppliedPromoCode('');
+      setPromoMessage(null);
+      return;
+    }
 
     setIsValidatingPromo(true);
     setPromoMessage(null);
@@ -172,17 +239,32 @@ export default function CheckoutPage() {
     e.preventDefault();
     if (cart.length === 0) return;
 
-    setIsCreatingOrder(true);
     setCheckoutError(null);
 
+    // Hanya validasi email (apakah sudah diisi & apakah domain setelah '@' benar)
+    const emailValidation = checkClientEmailFormat(customerEmail);
+    if (!emailValidation.valid) {
+      setCheckoutError(emailValidation.errorText);
+      return;
+    }
+
+    setIsCreatingOrder(true);
+
     try {
+      // Jika pembeli mengetik kode promo di kotak input, kirimkan secara opsional
+      const promoToUse =
+        appliedPromo && appliedPromo.valid
+          ? appliedPromoCode
+          : promoInput.trim()
+          ? promoInput.trim().toUpperCase()
+          : null;
+
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_email: customerEmail.trim(),
-          promo_code:
-            appliedPromo && appliedPromo.valid ? appliedPromoCode : null,
+          customer_email: customerEmail.trim().toLowerCase(),
+          promo_code: promoToUse,
           items: cart.map((item) => ({
             product_id: item.product.id,
             quantity: item.quantity,
@@ -192,7 +274,7 @@ export default function CheckoutPage() {
 
       const data = (await res.json()) as CheckoutApiResponse;
       if (!res.ok || !data.order) {
-        throw new Error(data.error || 'Gagal membuat pesanan QRIS.');
+        throw new Error(data.error || 'Gagal menyiapkan kode pembayaran QRIS.');
       }
 
       setActiveOrder(data.order);
@@ -470,7 +552,7 @@ export default function CheckoutPage() {
                   Detail Pengiriman &amp; Pembayaran
                 </h2>
                 <p className="text-xs text-[#6B9071] mt-0.5">
-                  Lengkapi alamat email penerima di bawah ini untuk melanjutkan ke pembayaran QRIS.
+                  Lengkapi alamat email aktifmu di bawah ini untuk melanjutkan ke pembayaran QRIS.
                 </p>
               </div>
 
@@ -483,40 +565,53 @@ export default function CheckoutPage() {
                   <input
                     type="text"
                     inputMode="email"
-                    required
+                    autoComplete="email"
                     value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="Contoh: nama@gmail.com"
+                    onChange={(e) => {
+                      setCustomerEmail(e.target.value);
+                      if (checkoutError) setCheckoutError(null);
+                    }}
+                    placeholder="Contoh: nama@email.com"
                     className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
                   />
                 </div>
                 <p className="text-[11px] text-[#375534] mt-1.5 leading-relaxed">
-                  * Pastikan penulisan alamat email sudah benar karena link unduhan produk akan dikirimkan otomatis ke email ini.
+                  * Pastikan penulisan alamat email dan domain setelah tanda &ldquo;@&rdquo; sudah benar (mendukung Gmail, Yahoo, Outlook, dll.) karena file produk dikirim otomatis ke email ini.
                 </p>
               </div>
 
+              {/* Input Kode Promo — 100% Opsional */}
               <div>
                 <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
-                  Kode Promo Diskon (Opsional)
+                  Kode Promo Diskon (Opsional — Kosongkan Jika Tidak Ada)
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <TicketPercent className="w-4 h-4 text-[#6B9071] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
+                      required={false}
                       value={promoInput}
                       onChange={(e) =>
                         setPromoInput(e.target.value.toUpperCase())
                       }
-                      placeholder="Contoh: HEMAT20"
-                      className="w-full pl-10 pr-3 py-3 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 text-xs font-bold uppercase text-[#0F2A1D] focus:outline-none focus:border-[#375534]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (promoInput.trim()) {
+                            handleValidatePromo();
+                          }
+                        }
+                      }}
+                      placeholder="Kosongkan jika tidak pakai promo"
+                      className="w-full pl-10 pr-3 py-3 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 text-xs font-bold uppercase text-[#0F2A1D] placeholder:normal-case placeholder:font-normal focus:outline-none focus:border-[#375534]"
                     />
                   </div>
                   <button
                     type="button"
                     disabled={isValidatingPromo || !promoInput.trim()}
                     onClick={handleValidatePromo}
-                    className="px-4 py-3 rounded-2xl bg-[#E3EED4] hover:bg-[#375534] text-[#0F2A1D] hover:text-white text-xs font-extrabold transition-colors shrink-0"
+                    className="px-4 py-3 rounded-2xl bg-[#E3EED4] hover:bg-[#375534] disabled:opacity-50 text-[#0F2A1D] hover:text-white text-xs font-extrabold transition-colors shrink-0"
                   >
                     {isValidatingPromo ? 'Cek...' : 'Pakai'}
                   </button>

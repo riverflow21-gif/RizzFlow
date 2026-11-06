@@ -10,12 +10,14 @@ import {
   saveStoredCustomProjectOrders,
   buildProductDeliveryItems,
   sendAdminTelegramNotification,
+  sendClientTelegramNotification,
   CustomerSupportMessage,
   CustomServiceConfig,
   CustomProjectOrder,
+  CustomNotificationChannel,
 } from '@/lib/supabase';
 import { createDokuQrisPayment } from '@/lib/doku';
-import { sendCustomOrderEmail } from '@/lib/email';
+import { sendCustomOrderEmail, PurchasedFileLink } from '@/lib/email';
 
 async function verifyAdminAuth(request: Request): Promise<boolean> {
   const authHeader = request.headers.get('Authorization') || '';
@@ -36,6 +38,86 @@ function generateCustomOrderCode(existing: CustomProjectOrder[]): string {
   return `KST-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+/**
+ * Mengirim notifikasi ke Klien sesuai saluran yang dipilihnya (EMAIL, TELEGRAM, atau BOTH).
+ */
+async function dispatchClientCustomNotification(params: {
+  order: CustomProjectOrder;
+  type: 'CREATED' | 'ACCEPTED_ESTIMATE' | 'BILL_READY' | 'PAID_DELIVERY';
+  files?: PurchasedFileLink[];
+}): Promise<void> {
+  const channel: CustomNotificationChannel =
+    params.order.notify_channel || 'EMAIL';
+  const sendEmail = channel === 'EMAIL' || channel === 'BOTH';
+  const sendTg = channel === 'TELEGRAM' || channel === 'BOTH';
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL || 'https://rizzflow-theta.vercel.app';
+
+  // 1. Kirim via Email (Hanya jika klien memilih EMAIL atau BOTH dan mengisi email)
+  if (sendEmail && params.order.customer_email) {
+    try {
+      await sendCustomOrderEmail({
+        type: params.type,
+        toEmail: params.order.customer_email,
+        customerName: params.order.customer_name,
+        orderCode: params.order.order_code,
+        projectTitle: params.order.project_title,
+        estimatedCompletion: params.order.estimated_completion,
+        price: params.order.price,
+        adminNote: params.order.admin_note,
+        files: params.files,
+      });
+    } catch (e) {
+      console.error('Gagal mengirim email layanan kustom ke klien:', e);
+    }
+  }
+
+  // 2. Kirim via Bot Telegram @RizzFlow_Notif_bot (Jika klien memilih TELEGRAM atau BOTH)
+  if (sendTg && params.order.customer_telegram_id) {
+    let tgText = '';
+    if (params.type === 'CREATED') {
+      tgText =
+        `✨ *PESANAN LAYANAN KUSTOM DITERIMA*\n\n` +
+        `Halo *${params.order.customer_name}*,\n` +
+        `Permintaan layanan kustom *${params.order.project_title}* telah masuk ke antrian RizzFlow.\n\n` +
+        `🔑 *Kode Pesanan Kamu:* \`${params.order.order_code}\`\n\n` +
+        `Simpan kode di atas! Kami akan mengirimkan update estimasi pengerjaan dan tagihan melalui bot ini. Kamu juga dapat mengeceknya di menu Layanan: ${appUrl}`;
+    } else if (params.type === 'ACCEPTED_ESTIMATE') {
+      tgText =
+        `🛠️ *PESANAN DITERIMA & SEDANG DIPROSES*\n\n` +
+        `Halo *${params.order.customer_name}*,\n` +
+        `Pesanan kustom *${params.order.project_title}* (Kode: \`${params.order.order_code}\`) telah diterima Admin dan sedang dikerjakan!\n\n` +
+        `⏱️ *Estimasi Selesai:* ${params.order.estimated_completion || 'Segera'}\n` +
+        (params.order.price > 0
+          ? `💰 *Estimasi Biaya:* Rp${params.order.price.toLocaleString('id-ID')}\n`
+          : '') +
+        `📝 *Pesan Admin:* ${params.order.admin_note}\n\n` +
+        `Cek status kapan saja di: ${appUrl}`;
+    } else if (params.type === 'BILL_READY') {
+      tgText =
+        `🎉 *PRODUK KUSTOM SELESAI — SILAKAN LAKUKAN PEMBAYARAN*\n\n` +
+        `Halo *${params.order.customer_name}*,\n` +
+        `Pesanan kustom *${params.order.project_title}* (Kode: \`${params.order.order_code}\`) telah *SELESAI* dikerjakan!\n\n` +
+        `💵 *Total Tagihan:* *Rp${params.order.price.toLocaleString('id-ID')}*\n` +
+        `📝 *Catatan Admin:* ${params.order.admin_note}\n\n` +
+        `Silakan buka menu *Layanan* di ${appUrl}, masukkan kode \`${params.order.order_code}\`, dan bayar via QRIS untuk langsung mengunduh produkmu!`;
+    } else {
+      const fileLines = (params.files || [])
+        .map((f, i) => `${i + 1}. ${f.productTitle}:\n${f.signedDownloadUrl}`)
+        .join('\n\n');
+      tgText =
+        `✅ *PEMBAYARAN LUNAS — BERIKUT PRODUK KUSTOM KAMU*\n\n` +
+        `Terima kasih *${params.order.customer_name}*! Pembayaran untuk pesanan \`${params.order.order_code}\` telah lunas.\n\n` +
+        `📦 *Link Unduh Produk Kamu:*\n${fileLines || 'Silakan unduh langsung di halaman Layanan website RizzFlow.'}`;
+    }
+
+    await sendClientTelegramNotification(
+      params.order.customer_telegram_id,
+      tgText
+    );
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -44,7 +126,6 @@ export async function GET(request: Request) {
       .trim()
       .toUpperCase();
 
-    // 1. Jika pengunjung mengambil konfigurasi Layanan Kustom untuk tampilan toko
     if (isPublicConfig) {
       const config = await getStoredCustomServiceConfig();
       return NextResponse.json({
@@ -58,7 +139,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // 2. Jika pelanggan mengecek Kode Pesanan Layanan Kustom (Contoh: KST-4829)
     if (orderCodeParam) {
       const allCustomOrders = await getStoredCustomProjectOrders();
       const found = allCustomOrders.find(
@@ -74,12 +154,7 @@ export async function GET(request: Request) {
         );
       }
 
-      // Jika sudah LUNAS, buatkan tautan unduhan (Signed URL) agar bisa langsung diunduh di layar
-      let unlockedFiles: {
-        productTitle: string;
-        quantity: number;
-        signedDownloadUrl: string;
-      }[] = [];
+      let unlockedFiles: PurchasedFileLink[] = [];
 
       if (found.payment_status === 'PAID') {
         const rawDeliverable = JSON.stringify({
@@ -100,7 +175,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // 3. Jika Admin mengambil seluruh data Pesan, Antrian Layanan Kustom, & Konfigurasi
     const isAdmin = await verifyAdminAuth(request);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
@@ -126,11 +200,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
-      action?: 'SEND_MESSAGE' | 'GENERATE_CUSTOM_QRIS' | 'CONFIRM_CUSTOM_PAYMENT';
+      action?:
+        | 'SEND_MESSAGE'
+        | 'GENERATE_CUSTOM_QRIS'
+        | 'CONFIRM_CUSTOM_PAYMENT';
       type?: 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
+      notify_channel?: CustomNotificationChannel;
       sender_name?: string;
       sender_email?: string;
       sender_contact?: string;
+      customer_telegram_id?: string;
       invoice_number?: string;
       project_title?: string;
       message?: string;
@@ -139,7 +218,7 @@ export async function POST(request: Request) {
 
     const action = body.action || 'SEND_MESSAGE';
 
-    // A. PELANGGAN MEMBUAT QRIS UNTUK MEMBAYAR TAGIHAN LAYANAN KUSTOM
+    // A. KLIEN MEMBUKA QRIS UNTUK MEMBAYAR TAGIHAN LAYANAN KUSTOM
     if (action === 'GENERATE_CUSTOM_QRIS') {
       const code = (body.order_code || '').trim().toUpperCase();
       const allCustomOrders = await getStoredCustomProjectOrders();
@@ -165,7 +244,7 @@ export async function POST(request: Request) {
       const qrisRes = await createDokuQrisPayment({
         invoiceNumber: invoiceNum,
         amount: target.price,
-        customerEmail: target.customer_email,
+        customerEmail: target.customer_email || 'telegram-user@rizzflow.store',
       });
 
       const updatedOrders = allCustomOrders.map((o) =>
@@ -181,7 +260,16 @@ export async function POST(request: Request) {
       );
 
       await saveStoredCustomProjectOrders(updatedOrders);
-      const updatedTarget = updatedOrders.find((o) => o.order_code === code);
+      const updatedTarget = updatedOrders.find((o) => o.order_code === code)!;
+
+      // Notifikasi Telegram ke Admin bahwa klien sedang membuka QRIS pembayaran kustom
+      await sendAdminTelegramNotification(
+        `🧾 *KLIEN MEMBUKA QRIS TAGIHAN KUSTOM*\n\n` +
+          `🔑 Kode Pesanan: *${updatedTarget.order_code}*\n` +
+          `✨ Proyek: ${updatedTarget.project_title}\n` +
+          `👤 Klien: ${updatedTarget.customer_name}\n` +
+          `💵 Tagihan: *Rp${updatedTarget.price.toLocaleString('id-ID')}*`
+      );
 
       return NextResponse.json({
         customOrder: updatedTarget,
@@ -189,7 +277,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // B. PELANGGAN MELUNASI TAGIHAN LAYANAN KUSTOM -> KIRIM FILE OTOMATIS & CATAT PENDAPATAN
+    // B. KLIEN MELUNASI TAGIHAN LAYANAN KUSTOM -> KIRIM PRODUK OTOMATIS & NOTIF ADMIN
     if (action === 'CONFIRM_CUSTOM_PAYMENT') {
       const code = (body.order_code || '').trim().toUpperCase();
       const allCustomOrders = await getStoredCustomProjectOrders();
@@ -216,12 +304,14 @@ export async function POST(request: Request) {
       await saveStoredCustomProjectOrders(updatedOrders);
       const paidTarget = updatedOrders.find((o) => o.order_code === code)!;
 
-      // Masukkan ke tabel orders agar terhitung di Dashboard Pendapatan Admin
       const supabaseAdmin = getSupabaseAdmin();
       await supabaseAdmin.from('orders').insert({
         invoice_number:
-          paidTarget.invoice_number || `INV-${paidTarget.order_code}-${Date.now()}`,
-        customer_email: paidTarget.customer_email,
+          paidTarget.invoice_number ||
+          `INV-${paidTarget.order_code}-${Date.now()}`,
+        customer_email:
+          paidTarget.customer_email ||
+          `telegram-${paidTarget.customer_telegram_id || paidTarget.order_code}`,
         subtotal_amount: paidTarget.price,
         discount_amount: 0,
         final_amount: paidTarget.price,
@@ -241,28 +331,19 @@ export async function POST(request: Request) {
         rawFilePath: rawDeliverable,
       });
 
-      try {
-        await sendCustomOrderEmail({
-          type: 'PAID_DELIVERY',
-          toEmail: paidTarget.customer_email,
-          customerName: paidTarget.customer_name,
-          orderCode: paidTarget.order_code,
-          projectTitle: paidTarget.project_title,
-          price: paidTarget.price,
-          adminNote: paidTarget.admin_note,
-          files: unlockedFiles,
-        });
-      } catch (e) {
-        console.error('Gagal kirim email produk kustom lunas:', e);
-      }
+      await dispatchClientCustomNotification({
+        order: paidTarget,
+        type: 'PAID_DELIVERY',
+        files: unlockedFiles,
+      });
 
       await sendAdminTelegramNotification(
-        `💰 *TAGIHAN LAYANAN KUSTOM LUNAS!*\n\n` +
+        `💰 *TRANSAKSI LAYANAN KUSTOM BERHASIL LUNAS!*\n\n` +
           `🔑 Kode Pesanan: *${paidTarget.order_code}*\n` +
           `✨ Proyek: ${paidTarget.project_title}\n` +
-          `👤 Pelanggan: ${paidTarget.customer_name} (${paidTarget.customer_email})\n` +
+          `👤 Klien: ${paidTarget.customer_name}\n` +
           `💵 Nominal Lunas: *Rp${paidTarget.price.toLocaleString('id-ID')}*\n\n` +
-          `File produk kustom telah otomatis dikirim ke pelanggan!`
+          `File produk kustom telah otomatis dikirim ke klien!`
       );
 
       return NextResponse.json({
@@ -271,19 +352,55 @@ export async function POST(request: Request) {
       });
     }
 
-    // C. PELANGGAN MENGIRIM PESAN / MEMESAN LAYANAN KUSTOM BARU
+    // C. KLIEN MENGIRIM PESAN / MEMESAN LAYANAN KUSTOM BARU
     const senderName = (body.sender_name || '').trim();
     const senderEmail = (body.sender_email || '').trim().toLowerCase();
     const senderContact = (body.sender_contact || '').trim();
+    const customerTelegramId = (body.customer_telegram_id || '').trim();
+    const notifyChannel: CustomNotificationChannel =
+      body.notify_channel || 'EMAIL';
     const invoiceNumber = (body.invoice_number || '').trim();
     const projectTitle =
       (body.project_title || '').trim() || 'Pesanan Layanan Digital Kustom';
     const messageText = (body.message || '').trim();
     const msgType = body.type || 'LAYANAN_KHUSUS';
 
-    if (!senderName || !senderEmail || !messageText) {
+    if (!senderName || !messageText) {
       return NextResponse.json(
-        { error: 'Nama, alamat email, dan rincian pesan wajib diisi.' },
+        { error: 'Nama dan rincian pesan wajib diisi.' },
+        { status: 400 }
+      );
+    }
+
+    // Validasi sesuai saluran notifikasi yang dipilih klien
+    if (msgType === 'LAYANAN_KHUSUS') {
+      if (
+        (notifyChannel === 'EMAIL' || notifyChannel === 'BOTH') &&
+        (!senderEmail || !senderEmail.includes('@'))
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Mohon isi alamat email aktif kamu untuk menerima kode pesanan via Email.',
+          },
+          { status: 400 }
+        );
+      }
+      if (
+        (notifyChannel === 'TELEGRAM' || notifyChannel === 'BOTH') &&
+        !customerTelegramId
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Mohon isi ID Telegram (Chat ID) kamu untuk menerima notifikasi dari Bot Telegram.',
+          },
+          { status: 400 }
+        );
+      }
+    } else if (!senderEmail || !senderEmail.includes('@')) {
+      return NextResponse.json(
+        { error: 'Alamat email aktif wajib diisi.' },
         { status: 400 }
       );
     }
@@ -291,7 +408,6 @@ export async function POST(request: Request) {
     const nowIso = new Date().toISOString();
     let createdCustomOrder: CustomProjectOrder | null = null;
 
-    // Jika tipe pesan adalah LAYANAN_KHUSUS, buatkan Kode Pesanan Kustom (KST-XXXX)
     if (msgType === 'LAYANAN_KHUSUS') {
       const existingOrders = await getStoredCustomProjectOrders();
       const orderCode = generateCustomOrderCode(existingOrders);
@@ -300,13 +416,17 @@ export async function POST(request: Request) {
         id: crypto.randomUUID(),
         order_code: orderCode,
         customer_name: senderName,
-        customer_email: senderEmail,
+        customer_email:
+          notifyChannel === 'TELEGRAM' ? '' : senderEmail,
         customer_contact: senderContact,
+        customer_telegram_id: customerTelegramId,
+        notify_channel: notifyChannel,
         project_title: projectTitle,
         request_details: messageText,
+        estimated_completion: '',
         price: 0,
         admin_note:
-          'Pesanan layanan kustom kamu sedang ditinjau & dikerjakan oleh tim Admin RizzFlow.',
+          'Permintaan layanan kustom kamu telah masuk ke antrian dan sedang ditinjau oleh Admin RizzFlow.',
         file_paths: [],
         delivery_links: [],
         status: 'MENUNGGU_PENGERJAAN',
@@ -322,17 +442,10 @@ export async function POST(request: Request) {
         ...existingOrders,
       ]);
 
-      try {
-        await sendCustomOrderEmail({
-          type: 'CREATED',
-          toEmail: senderEmail,
-          customerName: senderName,
-          orderCode: createdCustomOrder.order_code,
-          projectTitle: createdCustomOrder.project_title,
-        });
-      } catch (e) {
-        console.error('Gagal kirim email kode pesanan kustom:', e);
-      }
+      await dispatchClientCustomNotification({
+        order: createdCustomOrder,
+        type: 'CREATED',
+      });
     }
 
     const existingMessages = await getStoredCustomerMessages();
@@ -340,7 +453,9 @@ export async function POST(request: Request) {
       id: crypto.randomUUID(),
       type: msgType,
       sender_name: senderName,
-      sender_email: senderEmail,
+      sender_email:
+        senderEmail ||
+        (customerTelegramId ? `Telegram ID: ${customerTelegramId}` : '-'),
       sender_contact: senderContact,
       invoice_number: createdCustomOrder
         ? createdCustomOrder.order_code
@@ -352,32 +467,33 @@ export async function POST(request: Request) {
 
     await saveStoredCustomerMessages([newMsg, ...existingMessages]);
 
-    // Kirim Notifikasi Telegram ke Admin
     const typeLabel =
       msgType === 'LAYANAN_KHUSUS'
         ? `✨ *PESANAN LAYANAN KUSTOM BARU (${createdCustomOrder?.order_code})*`
         : msgType === 'KLAIM_GARANSI'
         ? `🛡️ *KLAIM GARANSI BARU*`
-        : `💬 *PERTANYAAN PELANGGAN BARU*`;
+        : `💬 *PERTANYAAN KLIEN BARU*`;
 
     await sendAdminTelegramNotification(
       `${typeLabel}\n\n` +
         `👤 Nama: *${senderName}*\n` +
-        `📧 Email: ${senderEmail}\n` +
+        `🔔 Saluran Notif: *${notifyChannel}*\n` +
+        `📧 Email: ${senderEmail || '-'}\n` +
+        `🤖 ID Telegram: ${customerTelegramId || '-'}\n` +
         `📱 WA: ${senderContact || '-'}\n` +
         (createdCustomOrder
           ? `🔑 Kode Pesanan: *${createdCustomOrder.order_code}*\n🎯 Layanan: ${projectTitle}\n`
           : invoiceNumber
           ? `🧾 Invoice: #${invoiceNumber}\n`
           : '') +
-        `\n📝 *Pesan:*\n${messageText}`
+        `\n📝 *Rincian Pesan:*\n${messageText}`
     );
 
     return NextResponse.json({
       success: true,
       customOrder: createdCustomOrder,
       message: createdCustomOrder
-        ? `Pesanan Layanan Kustom berhasil dibuat dengan kode ${createdCustomOrder.order_code}! Kode juga telah dikirim ke emailmu.`
+        ? `Pesanan Layanan Kustom berhasil dibuat dengan kode ${createdCustomOrder.order_code}! Notifikasi kode pesanan telah dikirim sesuai pilihanmu.`
         : 'Pesan kamu berhasil dikirim ke Admin RizzFlow!',
     });
   } catch (err) {
@@ -432,15 +548,16 @@ export async function PATCH(request: Request) {
 
     const body = (await request.json()) as {
       target_type?: 'MESSAGE' | 'CUSTOM_ORDER';
+      step_action?: 'ACCEPT_ESTIMATE' | 'SEND_BILL' | 'COMPLETE_CLOSE';
       id?: string;
       status?: string;
+      estimated_completion?: string;
       price?: number;
       admin_note?: string;
       file_paths?: string[];
       delivery_links?: string[];
     };
 
-    // 1. Jika Admin mengunggah produk kustom yang sudah selesai & mengirim tagihan ke pelanggan
     if (body.target_type === 'CUSTOM_ORDER') {
       const allOrders = await getStoredCustomProjectOrders();
       const target = allOrders.find((o) => o.id === body.id);
@@ -452,7 +569,11 @@ export async function PATCH(request: Request) {
       }
 
       const nextStatus =
-        (body.status as CustomProjectOrder['status']) || 'SIAP_DIBAYAR';
+        (body.status as CustomProjectOrder['status']) || target.status;
+      const nextEstimate =
+        body.estimated_completion !== undefined
+          ? body.estimated_completion.trim()
+          : target.estimated_completion || '';
       const nextPrice =
         typeof body.price === 'number' ? Math.max(0, body.price) : target.price;
       const nextNote =
@@ -466,46 +587,51 @@ export async function PATCH(request: Request) {
         ? body.delivery_links
         : target.delivery_links;
 
+      const updatedOrderItem: CustomProjectOrder = {
+        ...target,
+        status: nextStatus,
+        estimated_completion: nextEstimate,
+        price: nextPrice,
+        admin_note: nextNote,
+        file_paths: nextFiles,
+        delivery_links: nextLinks,
+        updated_at: new Date().toISOString(),
+      };
+
       const updatedOrders = allOrders.map((o) =>
-        o.id === body.id
-          ? {
-              ...o,
-              status: nextStatus,
-              price: nextPrice,
-              admin_note: nextNote,
-              file_paths: nextFiles,
-              delivery_links: nextLinks,
-              updated_at: new Date().toISOString(),
-            }
-          : o
+        o.id === body.id ? updatedOrderItem : o
       );
 
       await saveStoredCustomProjectOrders(updatedOrders);
 
-      if (nextStatus === 'SIAP_DIBAYAR') {
-        try {
-          await sendCustomOrderEmail({
-            type: 'BILL_READY',
-            toEmail: target.customer_email,
-            customerName: target.customer_name,
-            orderCode: target.order_code,
-            projectTitle: target.project_title,
-            price: nextPrice,
-            adminNote: nextNote,
-          });
-        } catch (e) {
-          console.error('Gagal kirim email tagihan kustom:', e);
-        }
+      // Kirim pemberitahuan ke Klien sesuai tahapan alur Admin
+      if (body.step_action === 'ACCEPT_ESTIMATE' || nextStatus === 'DIPROSES') {
+        await dispatchClientCustomNotification({
+          order: updatedOrderItem,
+          type: 'ACCEPTED_ESTIMATE',
+        });
+      } else if (
+        body.step_action === 'SEND_BILL' ||
+        nextStatus === 'SIAP_DIBAYAR'
+      ) {
+        await dispatchClientCustomNotification({
+          order: updatedOrderItem,
+          type: 'BILL_READY',
+        });
       }
 
       return NextResponse.json({
         success: true,
         customOrders: updatedOrders,
-        message: `Pesanan ${target.order_code} berhasil ditandai selesai & email tagihan telah dikirim ke pelanggan!`,
+        message:
+          body.step_action === 'ACCEPT_ESTIMATE'
+            ? `Pesanan ${target.order_code} diterima & info estimasi pengerjaan telah dikirim ke klien!`
+            : body.step_action === 'SEND_BILL'
+            ? `Produk ${target.order_code} siap & pemberitahuan tagihan telah dikirim ke klien!`
+            : `Status pesanan ${target.order_code} berhasil diperbarui!`,
       });
     }
 
-    // 2. Jika Admin mengubah status Pesan Biasa / Klaim Garansi
     const messages = await getStoredCustomerMessages();
     const updated = messages.map((m) =>
       m.id === body.id
