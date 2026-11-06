@@ -197,8 +197,8 @@ export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
   admin_telegram: '',
   telegram_bot_token: '',
   telegram_chat_id: '',
-  report_email: 'rizzflow10@gmail.com',
-  smtp_email: '',
+  report_email: 'rizzflow55@gmail.com',
+  smtp_email: 'rizzflow55@gmail.com',
   smtp_app_password: '',
 };
 
@@ -234,21 +234,54 @@ export interface CustomProjectOrder {
   updated_at: string;
 }
 
+export interface BackupOrderItem {
+  product_id: string;
+  product_title: string;
+  quantity: number;
+  price_at_purchase: number;
+}
+
 const MESSAGES_STORAGE_FILE = '__rizzflow_customer_messages.json';
 const CUSTOM_SERVICES_STORAGE_FILE = '__rizzflow_custom_services.json';
 const CUSTOM_ORDERS_STORAGE_FILE = '__rizzflow_custom_project_orders.json';
+const ORDER_ITEMS_BACKUP_FILE = '__rizzflow_order_items_backup.json';
+
+/**
+ * Mengunduh file JSON dari Supabase Storage tanpa tertahan cache lama.
+ */
+async function downloadJsonFromStorage(fileName: string): Promise<string | null> {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: signedData } = await supabaseAdmin.storage
+      .from('digital-products')
+      .createSignedUrl(fileName, 60);
+
+    if (signedData?.signedUrl) {
+      const res = await fetch(`${signedData.signedUrl}&t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        return await res.text();
+      }
+    }
+
+    const { data, error } = await supabaseAdmin.storage
+      .from('digital-products')
+      .download(fileName);
+
+    if (error || !data) return null;
+    return await data.text();
+  } catch {
+    return null;
+  }
+}
 
 export async function getStoredCustomerMessages(): Promise<
   CustomerSupportMessage[]
 > {
   try {
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin.storage
-      .from('digital-products')
-      .download(MESSAGES_STORAGE_FILE);
-
-    if (error || !data) return [];
-    const text = await data.text();
+    const text = await downloadJsonFromStorage(MESSAGES_STORAGE_FILE);
+    if (!text) return [];
     const parsed = JSON.parse(text) as unknown;
     return Array.isArray(parsed) ? (parsed as CustomerSupportMessage[]) : [];
   } catch {
@@ -272,15 +305,16 @@ export async function saveStoredCustomerMessages(
 
 export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfig> {
   try {
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin.storage
-      .from('digital-products')
-      .download(CUSTOM_SERVICES_STORAGE_FILE);
+    const text = await downloadJsonFromStorage(CUSTOM_SERVICES_STORAGE_FILE);
+    if (!text) return DEFAULT_CUSTOM_SERVICE_CONFIG;
 
-    if (error || !data) return DEFAULT_CUSTOM_SERVICE_CONFIG;
-
-    const text = await data.text();
     const parsed = JSON.parse(text) as Partial<CustomServiceConfig>;
+    // Satukan email agar jika user mengisi salah satu (report_email atau smtp_email), keduanya otomatis sinkron
+    const activeEmail =
+      (parsed.smtp_email || '').trim() ||
+      (parsed.report_email || '').trim() ||
+      'rizzflow55@gmail.com';
+
     return {
       title: parsed.title || DEFAULT_CUSTOM_SERVICE_CONFIG.title,
       description:
@@ -293,9 +327,8 @@ export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfi
       admin_telegram: parsed.admin_telegram || '',
       telegram_bot_token: parsed.telegram_bot_token || '',
       telegram_chat_id: parsed.telegram_chat_id || '',
-      report_email:
-        parsed.report_email || DEFAULT_CUSTOM_SERVICE_CONFIG.report_email,
-      smtp_email: parsed.smtp_email || '',
+      report_email: activeEmail,
+      smtp_email: activeEmail,
       smtp_app_password: parsed.smtp_app_password || '',
     };
   } catch {
@@ -321,13 +354,8 @@ export async function getStoredCustomProjectOrders(): Promise<
   CustomProjectOrder[]
 > {
   try {
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin.storage
-      .from('digital-products')
-      .download(CUSTOM_ORDERS_STORAGE_FILE);
-
-    if (error || !data) return [];
-    const text = await data.text();
+    const text = await downloadJsonFromStorage(CUSTOM_ORDERS_STORAGE_FILE);
+    if (!text) return [];
     const parsed = JSON.parse(text) as unknown;
     return Array.isArray(parsed) ? (parsed as CustomProjectOrder[]) : [];
   } catch {
@@ -347,6 +375,59 @@ export async function saveStoredCustomProjectOrders(
       contentType: 'application/json',
       upsert: true,
     });
+}
+
+/**
+ * Menyimpan cadangan item pesanan per invoice agar saat pembayaran selesai,
+ * daftar produk selalu ditemukan meskipun tabel order_items di DB berbeda kolom.
+ */
+export async function saveOrderItemsBackup(
+  invoiceNumber: string,
+  items: BackupOrderItem[]
+): Promise<void> {
+  try {
+    const text = await downloadJsonFromStorage(ORDER_ITEMS_BACKUP_FILE);
+    const currentMap: { [key: string]: BackupOrderItem[] } = text
+      ? (JSON.parse(text) as { [key: string]: BackupOrderItem[] })
+      : {};
+
+    currentMap[invoiceNumber] = items;
+
+    // Simpan maksimal 200 transaksi terakhir agar tetap ringan
+    const keys = Object.keys(currentMap);
+    if (keys.length > 200) {
+      delete currentMap[keys[0]];
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    await supabaseAdmin.storage
+      .from('digital-products')
+      .upload(
+        ORDER_ITEMS_BACKUP_FILE,
+        Buffer.from(JSON.stringify(currentMap), 'utf-8'),
+        {
+          contentType: 'application/json',
+          upsert: true,
+        }
+      );
+  } catch (e) {
+    console.error('Gagal menyimpan backup order items:', e);
+  }
+}
+
+export async function getOrderItemsBackup(
+  invoiceNumber: string
+): Promise<BackupOrderItem[]> {
+  try {
+    const text = await downloadJsonFromStorage(ORDER_ITEMS_BACKUP_FILE);
+    if (!text) return [];
+    const currentMap = JSON.parse(text) as {
+      [key: string]: BackupOrderItem[];
+    };
+    return currentMap[invoiceNumber] || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function sendAdminTelegramNotification(

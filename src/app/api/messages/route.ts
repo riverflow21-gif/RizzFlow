@@ -59,7 +59,7 @@ async function dispatchClientCustomNotification(params: {
     !rawEnvUrl.includes('127.0.0.1')
       ? rawEnvUrl.replace(/\/+$/, '')
       : 'https://rizzflow-theta.vercel.app';
-      
+
   // 1. Kirim via Email (Hanya jika klien memilih EMAIL atau BOTH dan mengisi email)
   if (sendEmail && params.order.customer_email) {
     try {
@@ -517,34 +517,59 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     }
 
-    const body = (await request.json()) as Partial<CustomServiceConfig>;
+    const body = (await request.json()) as Partial<CustomServiceConfig> & {
+      test_email?: boolean;
+    };
+
     const cleanServices = Array.isArray(body.services)
       ? body.services.map((s) => s.trim()).filter((s) => s.length > 0)
       : [];
 
+    const unifiedEmail =
+      (body.smtp_email || '').trim() ||
+      (body.report_email || '').trim() ||
+      'rizzflow55@gmail.com';
+
     const newConfig: CustomServiceConfig = {
-       title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
-       description: (body.description || '').trim(),
-       services: cleanServices,
-       admin_whatsapp: (body.admin_whatsapp || '').trim(),
-       admin_telegram: (body.admin_telegram || '').trim(),
-       telegram_bot_token: (body.telegram_bot_token || '').trim(),
-       telegram_chat_id: (body.telegram_chat_id || '').trim(),
-       report_email: (body.report_email || '').trim() || 'rizzflow10@gmail.com',
-       smtp_email: (body.smtp_email || '').trim(),
-       smtp_app_password: (body.smtp_app_password || '').trim(),
-     };
+      title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
+      description: (body.description || '').trim(),
+      services: cleanServices,
+      admin_whatsapp: (body.admin_whatsapp || '').trim(),
+      admin_telegram: (body.admin_telegram || '').trim(),
+      telegram_bot_token: (body.telegram_bot_token || '').trim(),
+      telegram_chat_id: (body.telegram_chat_id || '').trim(),
+      report_email: unifiedEmail,
+      smtp_email: unifiedEmail,
+      smtp_app_password: (body.smtp_app_password || '').trim(),
+    };
 
     await saveStoredCustomServiceConfig(newConfig);
+
+    if (body.test_email) {
+      const { sendTestAdminEmail } = await import('@/lib/email');
+      const testRes = await sendTestAdminEmail(unifiedEmail);
+      return NextResponse.json({
+        success: true,
+        customServiceConfig: newConfig,
+        message: `Pengaturan disimpan & Email Tes BERHASIL dikirim dari ${testRes.senderEmail} ke ${testRes.recipientEmail}! Silakan cek kotak masuk emailmu.`,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       customServiceConfig: newConfig,
       message:
-        'Pengaturan Layanan Kustom, Kontak & Bot Telegram berhasil disimpan!',
+        'Pengaturan Email, Layanan Kustom & Bot Telegram berhasil disimpan!',
     });
-  } catch {
+  } catch (err) {
+    const errMsg =
+      err instanceof Error
+        ? err.message
+        : 'Gagal menyimpan atau mengirim email tes.';
     return NextResponse.json(
-      { error: 'Gagal menyimpan pengaturan Layanan Kustom.' },
+      {
+        error: `Gagal: ${errMsg}. Pastikan App Password Gmail 16 Digit berasal dari akun Gmail yang kamu tulis di atas!`,
+      },
       { status: 500 }
     );
   }

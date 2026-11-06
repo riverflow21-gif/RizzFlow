@@ -4,6 +4,7 @@ import {
   getSupabaseAdmin,
   buildProductDeliveryItems,
   sendAdminTelegramNotification,
+  getOrderItemsBackup,
 } from '@/lib/supabase';
 import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
 import { Order, OrderItem, Product } from '@/types';
@@ -122,8 +123,27 @@ export async function POST(request: Request) {
       })
       .eq('id', order.id);
 
-    const orderItems = (order.order_items || []) as OrderItem[];
-    const productIds = orderItems
+    const dbOrderItems = (order.order_items || []) as OrderItem[];
+    const backupItems = await getOrderItemsBackup(order.invoice_number);
+
+    const effectiveItems: {
+      product_id: string | null;
+      product_title: string;
+      quantity: number;
+    }[] =
+      dbOrderItems.length > 0
+        ? dbOrderItems.map((i) => ({
+            product_id: i.product_id,
+            product_title: i.product_title,
+            quantity: i.quantity,
+          }))
+        : backupItems.map((b) => ({
+            product_id: b.product_id,
+            product_title: b.product_title,
+            quantity: b.quantity,
+          }));
+
+    const productIds = effectiveItems
       .map((i) => i.product_id)
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
@@ -135,29 +155,39 @@ export async function POST(request: Request) {
     const productList = (productsData || []) as Product[];
     const deliveryFiles: PurchasedFileLink[] = [];
 
-    for (const item of orderItems) {
+    for (const item of effectiveItems) {
       if (!item.product_id) continue;
       const product = productList.find((p) => p.id === item.product_id);
       if (!product) continue;
 
-      const builtLinks = await buildProductDeliveryItems({
-        productTitle: item.product_title,
-        quantity: item.quantity,
-        rawFilePath: product.file_path,
-      });
-      deliveryFiles.push(...builtLinks);
+      try {
+        const builtLinks = await buildProductDeliveryItems({
+          productTitle: item.product_title || product.title,
+          quantity: item.quantity,
+          rawFilePath: product.file_path,
+        });
+        deliveryFiles.push(...builtLinks);
+      } catch (linkErr) {
+        console.error('Gagal membuat signed link produk:', linkErr);
+      }
     }
 
-    if (deliveryFiles.length > 0) {
+    let emailStatusNote = '✅ Email produk berhasil dikirim ke pembeli!';
+    try {
       await sendProductDeliveryEmail({
         toEmail: order.customer_email,
         invoiceNumber: order.invoice_number,
         totalPaid: order.final_amount,
         files: deliveryFiles,
       });
+    } catch (mailErr) {
+      const errMsg =
+        mailErr instanceof Error ? mailErr.message : 'Error SMTP Gmail';
+      console.error('Gagal mengirim email produk:', errMsg);
+      emailStatusNote = `⚠️ Email GAGAL terkirim (${errMsg}). Pastikan App Password 16 Digit untuk email pengirim sudah diisi di Pengaturan Admin!`;
     }
 
-    const itemsSummary = orderItems
+    const itemsSummary = effectiveItems
       .map((i) => `• ${i.product_title} (x${i.quantity})`)
       .join('\n');
 
@@ -166,13 +196,15 @@ export async function POST(request: Request) {
         `🧾 Invoice: *#${order.invoice_number}*\n` +
         `📧 Pembeli: ${order.customer_email}\n` +
         `💵 Total Lunas: *Rp${order.final_amount.toLocaleString('id-ID')}*\n\n` +
-        `📦 *Produk Terkirim:*\n${itemsSummary}`
+        `📦 *Produk:*\n${itemsSummary || '-'}\n\n` +
+        `📨 *Status Email:* ${emailStatusNote}`
     );
 
     return NextResponse.json({
       received: true,
       invoice_number: order.invoice_number,
       status: 'PAID_AND_DELIVERED',
+      email_status: emailStatusNote,
     });
   } catch (err) {
     console.error('Webhook processing error:', err);

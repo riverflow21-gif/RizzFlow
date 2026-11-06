@@ -9,10 +9,6 @@ export interface PurchasedFileLink {
 
 const OFFICIAL_STORE_URL = 'https://rizzflow-theta.vercel.app';
 
-/**
- * Memastikan link toko yang dikirim ke klien SELALU menggunakan domain resmi Vercel
- * dan tidak pernah mengirimkan tulisan localhost:3000.
- */
 function getPublicStoreUrl(): string {
   const rawEnv = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
   if (
@@ -28,13 +24,24 @@ function getPublicStoreUrl(): string {
 async function createGmailTransporter() {
   const cfg = await getStoredCustomServiceConfig();
 
-  const gmailUser = (cfg.smtp_email || process.env.GMAIL_USER || '').trim();
-  const rawPass = cfg.smtp_app_password || process.env.GMAIL_APP_PASSWORD || '';
+  // Prioritaskan email yang diatur di Admin (misal rizzflow55@gmail.com)
+  const adminEmail = (cfg.smtp_email || cfg.report_email || '').trim();
+  const envEmail = (process.env.GMAIL_USER || '').trim();
+
+  const gmailUser =
+    adminEmail && adminEmail !== 'rizzflow10@gmail.com'
+      ? adminEmail
+      : envEmail || adminEmail;
+
+  const rawPass =
+    (cfg.smtp_app_password || '').trim() ||
+    (process.env.GMAIL_APP_PASSWORD || '').trim();
   const gmailAppPassword = rawPass.split(' ').join('').trim();
 
   if (!gmailUser || !gmailAppPassword) {
-    console.warn('Email pengirim (Gmail User / App Password) belum diatur.');
-    return null;
+    throw new Error(
+      `Konfigurasi pengirim email (${gmailUser || 'Email kosong'}) belum memiliki App Password Gmail 16 Digit.`
+    );
   }
 
   return {
@@ -51,6 +58,43 @@ async function createGmailTransporter() {
   };
 }
 
+/**
+ * Fungsi khusus untuk mengetes apakah Email Gmail & App Password 16 Digit
+ * yang dimasukkan di halaman Admin sudah benar dan bisa mengirim email.
+ */
+export async function sendTestAdminEmail(targetEmail?: string): Promise<{
+  senderEmail: string;
+  recipientEmail: string;
+}> {
+  const mailSetup = await createGmailTransporter();
+  const recipient = (targetEmail || '').trim() || mailSetup.gmailUser;
+  const appUrl = getPublicStoreUrl();
+
+  await mailSetup.transporter.sendMail({
+    from: `"RizzFlow" <${mailSetup.gmailUser}>`,
+    replyTo: mailSetup.gmailUser,
+    to: recipient,
+    subject: `Tes Pengiriman Email Toko RizzFlow Berhasil!`,
+    text: `Halo Admin RizzFlow,\n\nSelamat! Pengaturan email pengirim (${mailSetup.gmailUser}) dan App Password Gmail 16 digit kamu sudah benar dan aktif.\n\nSekarang setiap pembeli yang berbelanja di ${appUrl} akan langsung menerima email produk secara otomatis.`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #AEC3B0; border-radius: 16px; color: #0F2A1D;">
+        <h2 style="margin-top: 0; color: #0F2A1D;">✅ Tes Email RizzFlow Berhasil!</h2>
+        <p style="font-size: 14px; line-height: 1.6; color: #375534;">
+          Selamat! Pengaturan email pengirim <strong>${mailSetup.gmailUser}</strong> beserta <strong>App Password 16 digit</strong> kamu sudah terhubung dengan sempurna.
+        </p>
+        <p style="font-size: 13px; color: #6B9071;">
+          Toko Resmi: <a href="${appUrl}" style="color: #0F2A1D; font-weight: bold;">${appUrl}</a>
+        </p>
+      </div>
+    `,
+  });
+
+  return {
+    senderEmail: mailSetup.gmailUser,
+    recipientEmail: recipient,
+  };
+}
+
 export async function sendProductDeliveryEmail(params: {
   toEmail: string;
   invoiceNumber: string;
@@ -61,8 +105,6 @@ export async function sendProductDeliveryEmail(params: {
   if (!cleanEmail || !cleanEmail.includes('@')) return;
 
   const mailSetup = await createGmailTransporter();
-  if (!mailSetup) return;
-
   const appUrl = getPublicStoreUrl();
 
   const plainTextFiles = params.files
@@ -144,8 +186,6 @@ export async function sendCustomOrderEmail(params: {
   }
 
   const mailSetup = await createGmailTransporter();
-  if (!mailSetup) return false;
-
   const appUrl = getPublicStoreUrl();
 
   let subject = `Kode Pesanan Layanan Kustom RizzFlow (${params.orderCode})`;

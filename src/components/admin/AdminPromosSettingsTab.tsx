@@ -546,7 +546,7 @@ export default function AdminPromosSettingsTab({
               </div>
             )}
 
-            {/* ISI MODAL 1: PENGATURAN GMAIL & EMAIL WEB */}
+            {/* ISI MODAL 1: PENGATURAN GMAIL & EMAIL WEB (1 KOLOM EMAIL TERPADU + TOMBOL TES) */}
             {activeSettingModal === 'GMAIL' && (
               <form
                 onSubmit={handleSaveCustomConfigAndClose}
@@ -555,45 +555,32 @@ export default function AdminPromosSettingsTab({
                 <div className="p-4 rounded-2xl bg-white border border-[#AEC3B0]/60 space-y-4">
                   <div>
                     <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
-                      Email Penerima Laporan Web (Tombol &ldquo;laporkan&rdquo; di Footer)
+                      Alamat Email Gmail Utama Toko (Pengirim ke Klien &amp; Penerima Laporan) *
                     </label>
                     <input
                       type="email"
+                      required
                       disabled={!isEditUnlocked}
-                      value={customService.report_email || ''}
-                      onChange={(e) =>
-                        onChangeCustomService({
-                          ...customService,
-                          report_email: e.target.value,
-                        })
+                      value={
+                        customService.smtp_email ||
+                        customService.report_email ||
+                        'rizzflow55@gmail.com'
                       }
-                      placeholder="Contoh: rizzflow55@gmail.com"
-                      className="w-full px-4 py-3 bg-[#F6F8F3] disabled:opacity-65 border border-[#AEC3B0] rounded-2xl text-xs sm:text-sm text-[#0F2A1D]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
-                      Email Gmail Pengirim ke Klien (Opsional — Override .env)
-                    </label>
-                    <input
-                      type="email"
-                      disabled={!isEditUnlocked}
-                      value={customService.smtp_email || ''}
                       onChange={(e) =>
                         onChangeCustomService({
                           ...customService,
                           smtp_email: e.target.value,
+                          report_email: e.target.value,
                         })
                       }
-                      placeholder="Kosongkan jika tetap memakai GMAIL_USER di .env"
-                      className="w-full px-4 py-3 bg-[#F6F8F3] disabled:opacity-65 border border-[#AEC3B0] rounded-2xl text-xs sm:text-sm text-[#0F2A1D]"
+                      placeholder="Contoh: rizzflow55@gmail.com"
+                      className="w-full px-4 py-3 bg-[#F6F8F3] disabled:opacity-65 border border-[#AEC3B0] rounded-2xl text-xs sm:text-sm font-bold text-[#0F2A1D]"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
-                      App Password Gmail 16 Digit (Opsional — Override .env)
+                      App Password Gmail 16 Digit (Dari Akun Email di Atas) *
                     </label>
                     <input
                       type="password"
@@ -605,38 +592,97 @@ export default function AdminPromosSettingsTab({
                           smtp_app_password: e.target.value,
                         })
                       }
-                      placeholder="Kosongkan jika tetap memakai GMAIL_APP_PASSWORD di .env"
+                      placeholder="Masukkan 16 digit Sandi Aplikasi dari Google Security"
                       className="w-full px-4 py-3 bg-[#F6F8F3] disabled:opacity-65 border border-[#AEC3B0] rounded-2xl text-xs sm:text-sm text-[#0F2A1D]"
                     />
+                    <p className="text-[11px] text-[#375534] mt-1.5 leading-relaxed">
+                      * Penting: Karena kamu mengganti email ke <strong>rizzflow55@gmail.com</strong>, wajib isi 16 digit Sandi Aplikasi (App Password) yang dibuat dari akun Google <strong>rizzflow55@gmail.com</strong>.
+                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2.5">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={closeSettingModal}
-                    className="px-5 py-2.5 rounded-full bg-white border border-[#AEC3B0] text-[#0F2A1D] text-xs font-extrabold"
+                    className="px-4 py-2.5 rounded-full bg-white border border-[#AEC3B0] text-[#0F2A1D] text-xs font-extrabold"
                   >
                     Tutup
                   </button>
+
                   {isEditUnlocked && (
-                    <button
-                      type="submit"
-                      disabled={isSavingModal}
-                      className="px-6 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm"
-                    >
-                      {isSavingModal ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Menyimpan...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-[#E3EED4]" />
-                          <span>Save &amp; Tutup</span>
-                        </>
-                      )}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        disabled={isSavingModal}
+                        onClick={async () => {
+                          setIsSavingModal(true);
+                          try {
+                            const res = await fetch('/api/messages', {
+                              method: 'PUT',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${accessToken}`,
+                              },
+                              body: JSON.stringify({
+                                ...customService,
+                                test_email: true,
+                              }),
+                            });
+                            const data = (await res.json()) as {
+                              customServiceConfig?: CustomServiceConfig;
+                              message?: string;
+                              error?: string;
+                            };
+                            if (!res.ok) {
+                              throw new Error(
+                                data.error || 'Gagal mengirim email tes.'
+                              );
+                            }
+                            if (data.customServiceConfig) {
+                              onChangeCustomService(data.customServiceConfig);
+                            }
+                            onShowFeedback(
+                              'success',
+                              data.message || 'Email tes berhasil dikirim!'
+                            );
+                            setActiveSettingModal('NONE');
+                            setIsEditUnlocked(false);
+                          } catch (err) {
+                            onShowFeedback(
+                              'error',
+                              err instanceof Error
+                                ? err.message
+                                : 'Gagal mengirim email tes.'
+                            );
+                          } finally {
+                            setIsSavingModal(false);
+                          }
+                        }}
+                        className="px-4 py-2.5 rounded-full bg-[#375534] hover:bg-[#0F2A1D] text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Mail className="w-3.5 h-3.5 text-[#E3EED4]" />
+                        <span>Save &amp; Tes Kirim Email</span>
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={isSavingModal}
+                        className="px-5 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm"
+                      >
+                        {isSavingModal ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Menyimpan...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-[#E3EED4]" />
+                            <span>Save &amp; Tutup</span>
+                          </>
+                        )}
+                      </button>
+                    </>
                   )}
                 </div>
               </form>

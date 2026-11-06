@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   getSupabaseAdmin,
   sendAdminTelegramNotification,
+  saveOrderItemsBackup,
 } from '@/lib/supabase';
 import { createDokuQrisPayment } from '@/lib/doku';
 import { Product, PromoCode } from '@/types';
@@ -17,12 +18,6 @@ interface CheckoutRequestBody {
   items?: CheckoutRequestItem[];
 }
 
-/**
- * Memvalidasi email pelanggan:
- * - Wajib diisi
- * - Mendukung semua penyedia email (@gmail.com, @yahoo.com, @outlook.com, @domain.co.id, dll.)
- * - Mengecek kebenaran penulisan domain setelah tanda '@'
- */
 function validateEmailFormat(rawEmail: string): {
   valid: boolean;
   message: string;
@@ -104,7 +99,6 @@ export async function POST(request: Request) {
     const rawEmail = (body.customer_email || '').trim().toLowerCase();
     const items = Array.isArray(body.items) ? body.items : [];
 
-    // 1. Validasi Email
     const emailCheck = validateEmailFormat(rawEmail);
     if (!emailCheck.valid) {
       return NextResponse.json({ error: emailCheck.message }, { status: 400 });
@@ -166,7 +160,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Hitung Diskon Kode Promo (Opsional)
     let discountAmount = 0;
     let appliedPromoCode: string | null = null;
 
@@ -212,7 +205,6 @@ export async function POST(request: Request) {
       customerEmail: rawEmail,
     });
 
-    // 3. Simpan ke tabel 'orders' (Hanya kolom resmi yang ada di skema Supabase)
     const { data: insertedOrder, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
@@ -234,7 +226,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Simpan ke tabel 'order_items' menggunakan kolom 'price_at_purchase'
+    // Simpan ke tabel order_items DAN ke backup storage agar 100% aman saat pengiriman email
     const itemsWithOrderId = orderItemsPayload.map((item) => ({
       order_id: insertedOrder.id,
       product_id: item.product_id,
@@ -243,13 +235,8 @@ export async function POST(request: Request) {
       price_at_purchase: item.price_at_purchase,
     }));
 
-    const { error: itemsError } = await supabaseAdmin
-      .from('order_items')
-      .insert(itemsWithOrderId);
-
-    if (itemsError) {
-      console.error('Catatan insert order_items:', itemsError.message);
-    }
+    await supabaseAdmin.from('order_items').insert(itemsWithOrderId);
+    await saveOrderItemsBackup(invoiceNumber, orderItemsPayload);
 
     const productSummary = orderItemsPayload
       .map((i) => `• ${i.product_title} (x${i.quantity})`)
