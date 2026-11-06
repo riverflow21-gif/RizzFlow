@@ -50,9 +50,15 @@ async function dispatchClientCustomNotification(params: {
     params.order.notify_channel || 'EMAIL';
   const sendEmail = channel === 'EMAIL' || channel === 'BOTH';
   const sendTg = channel === 'TELEGRAM' || channel === 'BOTH';
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL || 'https://rizzflow-theta.vercel.app';
 
+  // Pastikan Bot Telegram selalu mengirim link resmi https://rizzflow-theta.vercel.app
+  const rawEnvUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  const appUrl =
+    rawEnvUrl &&
+    !rawEnvUrl.includes('localhost') &&
+    !rawEnvUrl.includes('127.0.0.1')
+      ? rawEnvUrl.replace(/\/+$/, '')
+      : 'https://rizzflow-theta.vercel.app';
   // 1. Kirim via Email (Hanya jika klien memilih EMAIL atau BOTH dan mengisi email)
   if (sendEmail && params.order.customer_email) {
     try {
