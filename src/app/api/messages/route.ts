@@ -59,6 +59,7 @@ async function dispatchClientCustomNotification(params: {
     !rawEnvUrl.includes('127.0.0.1')
       ? rawEnvUrl.replace(/\/+$/, '')
       : 'https://rizzflow-theta.vercel.app';
+      
   // 1. Kirim via Email (Hanya jika klien memilih EMAIL atau BOTH dan mengisi email)
   if (sendEmail && params.order.customer_email) {
     try {
