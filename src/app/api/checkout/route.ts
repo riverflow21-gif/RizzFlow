@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     const rawEmail = (body.customer_email || '').trim().toLowerCase();
     const items = Array.isArray(body.items) ? body.items : [];
 
-    // 1. Validasi Email (Hanya menolak jika email kosong atau domain setelah @ salah)
+    // 1. Validasi Email
     const emailCheck = validateEmailFormat(rawEmail);
     if (!emailCheck.valid) {
       return NextResponse.json({ error: emailCheck.message }, { status: 400 });
@@ -141,8 +141,7 @@ export async function POST(request: Request) {
       product_id: string;
       product_title: string;
       quantity: number;
-      unit_price: number;
-      total_price: number;
+      price_at_purchase: number;
     }[] = [];
 
     for (const reqItem of items) {
@@ -156,8 +155,7 @@ export async function POST(request: Request) {
         product_id: prod.id,
         product_title: prod.title,
         quantity: qty,
-        unit_price: prod.price,
-        total_price: itemTotal,
+        price_at_purchase: prod.price,
       });
     }
 
@@ -168,7 +166,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Kode Promo 100% Opsional (Tidak pernah menolak checkout meskipun kosong/tidak valid)
+    // 2. Hitung Diskon Kode Promo (Opsional)
     let discountAmount = 0;
     let appliedPromoCode: string | null = null;
 
@@ -214,6 +212,7 @@ export async function POST(request: Request) {
       customerEmail: rawEmail,
     });
 
+    // 3. Simpan ke tabel 'orders' (Hanya kolom resmi yang ada di skema Supabase)
     const { data: insertedOrder, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
@@ -222,7 +221,6 @@ export async function POST(request: Request) {
         subtotal_amount: subtotalAmount,
         discount_amount: discountAmount,
         final_amount: finalAmount,
-        promo_code: appliedPromoCode,
         payment_status: 'PENDING',
         qris_string: qrisResult.qris_string,
         qris_expires_at: qrisResult.expires_at,
@@ -236,12 +234,22 @@ export async function POST(request: Request) {
       );
     }
 
+    // 4. Simpan ke tabel 'order_items' menggunakan kolom 'price_at_purchase'
     const itemsWithOrderId = orderItemsPayload.map((item) => ({
-      ...item,
       order_id: insertedOrder.id,
+      product_id: item.product_id,
+      product_title: item.product_title,
+      quantity: item.quantity,
+      price_at_purchase: item.price_at_purchase,
     }));
 
-    await supabaseAdmin.from('order_items').insert(itemsWithOrderId);
+    const { error: itemsError } = await supabaseAdmin
+      .from('order_items')
+      .insert(itemsWithOrderId);
+
+    if (itemsError) {
+      console.error('Catatan insert order_items:', itemsError.message);
+    }
 
     const productSummary = orderItemsPayload
       .map((i) => `• ${i.product_title} (x${i.quantity})`)
@@ -251,6 +259,7 @@ export async function POST(request: Request) {
       `🛍️ *CHECKOUT PESANAN BARU*\n\n` +
         `🧾 Invoice: *#${invoiceNumber}*\n` +
         `📧 Email: ${rawEmail}\n` +
+        (appliedPromoCode ? `🎟️ Promo: ${appliedPromoCode}\n` : '') +
         `💰 Total Tagihan: *Rp${finalAmount.toLocaleString('id-ID')}*\n\n` +
         `📦 *Produk:*\n${productSummary}`
     );
