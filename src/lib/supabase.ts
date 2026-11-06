@@ -25,7 +25,7 @@ export async function generateProductSignedUrl(
   filePath: string
 ): Promise<string> {
   const supabaseAdmin = getSupabaseAdmin();
-  const expiresInSeconds = 60 * 60 * 24 * 7; // Berlaku 7 Hari
+  const expiresInSeconds = 60 * 60 * 24 * 7;
 
   const { data, error } = await supabaseAdmin.storage
     .from('digital-products')
@@ -158,10 +158,6 @@ export async function buildProductDeliveryItems(params: {
   return results;
 }
 
-// ============================================================================
-// PENYIMPANAN PESAN, LAYANAN KUSTOM, & NOTIFIKASI TELEGRAM (ADMIN & KLIEN)
-// ============================================================================
-
 export interface CustomerSupportMessage {
   id: string;
   type: 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
@@ -182,6 +178,9 @@ export interface CustomServiceConfig {
   admin_telegram?: string;
   telegram_bot_token?: string;
   telegram_chat_id?: string;
+  report_email?: string;
+  smtp_email?: string;
+  smtp_app_password?: string;
 }
 
 export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
@@ -198,6 +197,9 @@ export const DEFAULT_CUSTOM_SERVICE_CONFIG: CustomServiceConfig = {
   admin_telegram: '',
   telegram_bot_token: '',
   telegram_chat_id: '',
+  report_email: 'rizzflow10@gmail.com',
+  smtp_email: '',
+  smtp_app_password: '',
 };
 
 export type CustomNotificationChannel = 'EMAIL' | 'TELEGRAM' | 'BOTH';
@@ -211,7 +213,7 @@ export type CustomOrderStatus =
 
 export interface CustomProjectOrder {
   id: string;
-  order_code: string; // Contoh: KST-4829
+  order_code: string;
   customer_name: string;
   customer_email: string;
   customer_contact: string;
@@ -219,7 +221,7 @@ export interface CustomProjectOrder {
   notify_channel?: CustomNotificationChannel;
   project_title: string;
   request_details: string;
-  estimated_completion?: string; // Estimasi pengerjaan sampai selesai
+  estimated_completion?: string;
   price: number;
   admin_note: string;
   file_paths: string[];
@@ -291,6 +293,10 @@ export async function getStoredCustomServiceConfig(): Promise<CustomServiceConfi
       admin_telegram: parsed.admin_telegram || '',
       telegram_bot_token: parsed.telegram_bot_token || '',
       telegram_chat_id: parsed.telegram_chat_id || '',
+      report_email:
+        parsed.report_email || DEFAULT_CUSTOM_SERVICE_CONFIG.report_email,
+      smtp_email: parsed.smtp_email || '',
+      smtp_app_password: parsed.smtp_app_password || '',
     };
   } catch {
     return DEFAULT_CUSTOM_SERVICE_CONFIG;
@@ -343,9 +349,6 @@ export async function saveStoredCustomProjectOrders(
     });
 }
 
-/**
- * Mengirimkan notifikasi aktivitas klien ke Telegram Admin.
- */
 export async function sendAdminTelegramNotification(
   messageText: string
 ): Promise<void> {
@@ -378,10 +381,6 @@ export async function sendAdminTelegramNotification(
   }
 }
 
-/**
- * Mengirimkan notifikasi update pesanan Layanan Kustom langsung ke Telegram Klien
- * melalui bot https://t.me/RizzFlow_Notif_bot
- */
 export async function sendClientTelegramNotification(
   clientChatId: string,
   messageText: string

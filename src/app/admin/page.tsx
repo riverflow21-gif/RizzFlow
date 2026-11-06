@@ -496,10 +496,10 @@ export default function AdminDashboardPage() {
             )}
           </button>
           <img
-            src={ADMIN_LOGO_PATH}
-            alt="Logo"
-            className="h-8 w-8 rounded-lg object-contain bg-white p-0.5 shrink-0"
-          />
+    src={ADMIN_LOGO_PATH}
+    alt="Logo"
+    className="h-9 w-9 object-contain shrink-0"
+  />
           <span className="font-extrabold text-sm text-white truncate">
             Admin {settings.store_name}
           </span>

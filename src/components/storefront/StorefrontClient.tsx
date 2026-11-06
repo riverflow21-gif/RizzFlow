@@ -61,17 +61,13 @@ export default function StorefrontClient({
     DEFAULT_CUSTOM_SERVICE_CONFIG as CustomServiceConfig
   );
 
-  // Navigasi 3 Halaman Bersih: Home | Katalog | Layanan
   const [activeTab, setActiveTab] = useState('home' as StorefrontTab);
-
-  // Filter Katalog
   const [shopFilterMode, setShopFilterMode] = useState(
     'ALL' as ShopFilterMode
   );
   const [selectedCategoryId, setSelectedCategoryId] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Detail Produk & Keranjang Belanja
   const [activeProduct, setActiveProduct] = useState(
     null as NullableProduct
   );
@@ -254,6 +250,13 @@ export default function StorefrontClient({
     return rawTg.startsWith('http') ? rawTg : `https://t.me/${rawTg}`;
   };
 
+  // Email untuk tombol "laporkan" diambil secara dinamis dari pengaturan Admin
+  const dynamicReportEmail =
+    (customService.report_email || '').trim() ||
+    (settings.support_contact.includes('@')
+      ? settings.support_contact.trim()
+      : 'rizzflow10@gmail.com');
+
   const totalCartItems = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalCartPrice = cart.reduce(
     (acc, item) => acc + item.product.price * item.quantity,
@@ -283,9 +286,7 @@ export default function StorefrontClient({
           : 'min-h-screen bg-[#F6F8F3] text-[#0F2A1D] flex flex-col pb-24 md:pb-8'
       }
     >
-      {/* ==================================================================== */}
-      {/* TOP BAR STICKY (Tanpa Tombol Keranjang di Pojok Atas) */}
-      {/* ==================================================================== */}
+      {/* TOP BAR STICKY (Logo PNG Transparan Tanpa Kotak Putih) */}
       <header
         className={
           activeTab === 'home'
@@ -302,14 +303,13 @@ export default function StorefrontClient({
             <img
               src={LOGO_PATH}
               alt={settings.store_name}
-              className="h-9 w-9 rounded-xl object-contain bg-white p-0.5 border border-[#AEC3B0]/60 shrink-0"
+              className="h-9 w-9 object-contain shrink-0"
             />
             <span className="font-extrabold text-base sm:text-lg text-[#0F2A1D] truncate">
               {settings.store_name}
             </span>
           </button>
 
-          {/* Menu Kapsul Tengah Khusus Layar Desktop/Laptop */}
           <nav className="hidden md:flex items-center gap-1.5 bg-white p-1.5 rounded-full border border-[#AEC3B0]/50 rf-card-shadow">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
@@ -337,9 +337,6 @@ export default function StorefrontClient({
         </div>
       </header>
 
-      {/* ==================================================================== */}
-      {/* AREA KONTEN 3 HALAMAN (HOME | KATALOG | LAYANAN) */}
-      {/* ==================================================================== */}
       <main className="flex-1 w-full">
         <AnimatePresence mode="wait">
           {activeTab === 'home' && (
@@ -409,14 +406,14 @@ export default function StorefrontClient({
         </AnimatePresence>
       </main>
 
-      {/* Footer Ringkas */}
+      {/* Footer dengan Email Laporan Dinamis */}
       <footer className="border-t border-[#AEC3B0]/40 py-5 text-xs text-[#6B9071] bg-[#E3EED4]/35">
         <div className="max-w-5xl mx-auto px-4 flex flex-row items-center justify-between gap-2">
           <span>
             © {new Date().getFullYear()} {settings.store_name}. Seluruh hak cipta dilindungi.
           </span>
           <a
-            href="mailto:rizzflow10@gmail.com?subject=Laporan%20Website%20RizzFlow"
+            href={`mailto:${dynamicReportEmail}?subject=Laporan%20Website%20${encodeURIComponent(settings.store_name)}`}
             className="font-extrabold text-[#375534] hover:text-[#0F2A1D] hover:underline transition-colors"
           >
             laporkan
@@ -424,9 +421,7 @@ export default function StorefrontClient({
         </div>
       </footer>
 
-      {/* ==================================================================== */}
       {/* KERANJANG MENGAPUNG DI BAWAH LAYAR (Hanya Muncul Saat Ada Produk) */}
-      {/* ==================================================================== */}
       <AnimatePresence>
         {totalCartItems > 0 && (
           <motion.div
@@ -469,9 +464,7 @@ export default function StorefrontClient({
         )}
       </AnimatePresence>
 
-      {/* ==================================================================== */}
-      {/* FLOATING BOTTOM NAVIGATION BAR (HOME | KATALOG | LAYANAN) */}
-      {/* ==================================================================== */}
+      {/* FLOATING BOTTOM NAVIGATION BAR */}
       <div className="fixed bottom-4 inset-x-4 z-30 md:hidden flex justify-center pointer-events-none">
         <nav className="bg-white/95 backdrop-blur-md border border-[#AEC3B0]/60 rounded-full p-1.5 rf-bottom-bar-shadow flex items-center justify-between gap-1.5 w-full max-w-sm pointer-events-auto">
           {navItems.map((item) => {
@@ -497,9 +490,6 @@ export default function StorefrontClient({
         </nav>
       </div>
 
-      {/* ==================================================================== */}
-      {/* LEMBARAN DETAIL PRODUK 2/3 LAYAR */}
-      {/* ==================================================================== */}
       <ProductDetailSheet
         product={activeProduct}
         storeName={settings.store_name}
@@ -510,9 +500,7 @@ export default function StorefrontClient({
         }}
       />
 
-      {/* ==================================================================== */}
       {/* SLIDE-OVER KERANJANG BELANJA */}
-      {/* ==================================================================== */}
       <AnimatePresence>
         {isCartOpen && (
           <motion.div

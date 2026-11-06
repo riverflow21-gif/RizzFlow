@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Sparkles, Mail } from 'lucide-react';
 import { supabase, CustomServiceConfig } from '@/lib/supabase';
 import { PromoCode, StoreSettings } from '@/types';
 
@@ -175,7 +175,7 @@ export default function AdminPromosSettingsTab({
       onShowFeedback(
         'success',
         data.message ||
-          'Pengaturan Layanan Kustom & Notifikasi Telegram disimpan!'
+          'Pengaturan Email, Layanan Kustom & Bot Telegram berhasil disimpan!'
       );
     } catch (err) {
       onShowFeedback(
@@ -306,22 +306,89 @@ export default function AdminPromosSettingsTab({
         <div className="flex items-center gap-2 mb-1">
           <Sparkles className="w-5 h-5 text-[#375534]" />
           <h2 className="text-lg font-extrabold text-[#0F2A1D]">
-            Pengaturan Layanan Kustom, Kontak &amp; Notifikasi Bot Telegram
+            Pengaturan Email Web, Bot Telegram &amp; Layanan Kustom
           </h2>
         </div>
         <p className="text-xs text-[#6B9071] mb-5">
-          Atur layanan kustom yang tampil di toko serta masukkan Bot Token &amp; Chat ID Telegram kamu agar setiap ada pembelian atau pesan masuk langsung dikirim ke Telegrammu.
+          Ubah email laporan web, email Gmail pengirim otomatis ke klien, serta Bot Telegram kapan saja dari halaman ini.
         </p>
 
-        <form onSubmit={handleSaveCustomServiceConfig} className="space-y-4">
+        <form onSubmit={handleSaveCustomServiceConfig} className="space-y-5">
+          {/* KOTAK 1: PENGATURAN EMAIL PENGIRIM KE KLIEN & EMAIL LAPORAN WEB */}
+          <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0] space-y-3.5">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-[#0F2A1D]">
+              <Mail className="w-4 h-4 text-[#375534]" />
+              <span>
+                Pengaturan Email Web (Laporan &amp; Pengirim Otomatis ke Klien)
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
+                Email Penerima Laporan Web (Tombol &ldquo;laporkan&rdquo; di Footer)
+              </label>
+              <input
+                type="email"
+                value={customService.report_email || ''}
+                onChange={(e) =>
+                  onChangeCustomService({
+                    ...customService,
+                    report_email: e.target.value,
+                  })
+                }
+                placeholder="Contoh: rizzflow10@gmail.com"
+                className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
+                  Email Gmail Pengirim ke Klien (Opsional — Override .env)
+                </label>
+                <input
+                  type="email"
+                  value={customService.smtp_email || ''}
+                  onChange={(e) =>
+                    onChangeCustomService({
+                      ...customService,
+                      smtp_email: e.target.value,
+                    })
+                  }
+                  placeholder="Kosongkan jika tetap memakai GMAIL_USER di .env"
+                  className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
+                  App Password Gmail 16 Digit (Opsional — Override .env)
+                </label>
+                <input
+                  type="password"
+                  value={customService.smtp_app_password || ''}
+                  onChange={(e) =>
+                    onChangeCustomService({
+                      ...customService,
+                      smtp_app_password: e.target.value,
+                    })
+                  }
+                  placeholder="Kosongkan jika tetap memakai GMAIL_APP_PASSWORD di .env"
+                  className="w-full px-3.5 py-2 bg-white border border-[#AEC3B0] rounded-xl text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* KOTAK 2: PENGATURAN BOT TELEGRAM NOTIFIKASI */}
           <div className="p-4 rounded-2xl bg-[#E3EED4]/65 border border-[#6B9071] space-y-3">
             <div className="text-xs font-extrabold text-[#0F2A1D]">
-              🔔 Notifikasi Otomatis ke Telegram Pribadimu (Saat Ada Pembelian / Pesan Baru)
+              🔔 Notifikasi Otomatis Bot Telegram (Ke Kamu &amp; Klien Layanan Kustom)
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
-                  Telegram Bot Token (Dari @BotFather)
+                  Telegram Bot Token (@RizzFlow_Notif_bot)
                 </label>
                 <input
                   type="text"
@@ -339,7 +406,7 @@ export default function AdminPromosSettingsTab({
 
               <div>
                 <label className="block text-[11px] font-bold text-[#0F2A1D] mb-1">
-                  Telegram Chat ID Kamu (Dari @userinfobot)
+                  Telegram Chat ID Kamu (Admin)
                 </label>
                 <input
                   type="text"
@@ -476,7 +543,7 @@ export default function AdminPromosSettingsTab({
           >
             {isSavingCustomService
               ? 'Menyimpan...'
-              : 'Simpan Layanan Kustom & Notifikasi Telegram'}
+              : 'Simpan Pengaturan Email, Telegram & Layanan Kustom'}
           </button>
         </form>
       </div>

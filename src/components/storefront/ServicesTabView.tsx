@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Sparkles,
@@ -20,6 +20,7 @@ import {
   Copy,
   Clock,
   ExternalLink,
+  X,
 } from 'lucide-react';
 import { CustomNotificationChannel } from '@/lib/supabase';
 import {
@@ -50,6 +51,7 @@ type NullableCustomOrder = CustomProjectOrder | null;
 type NullableString = string | null;
 
 const NOTIF_BOT_URL = 'https://t.me/RizzFlow_Notif_bot';
+const USERINFOBOT_URL = 'https://t.me/userinfobot';
 
 export default function ServicesTabView({
   customService,
@@ -80,6 +82,7 @@ export default function ServicesTabView({
   const [notifyChannel, setNotifyChannel] = useState(
     'EMAIL' as CustomNotificationChannel
   );
+  const [showTelegramGuideModal, setShowTelegramGuideModal] = useState(false);
   const [senderName, setSenderName] = useState('');
   const [senderEmail, setSenderEmail] = useState('');
   const [customerTelegramId, setCustomerTelegramId] = useState('');
@@ -367,7 +370,7 @@ export default function ServicesTabView({
       </section>
 
       {/* ==================================================================== */}
-      {/* HASIL PENGECEKAN KODE PESANAN KUSTOM (ESTIMASI, TAGIHAN & UNDUH) */}
+      {/* HASIL PENGECEKAN KODE PESANAN KUSTOM */}
       {/* ==================================================================== */}
       {checkedOrder && (
         <motion.section
@@ -418,7 +421,6 @@ export default function ServicesTabView({
             </div>
           </div>
 
-          {/* Keterangan Admin & Estimasi Pengerjaan */}
           <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/50 space-y-2.5 text-xs sm:text-sm text-[#0F2A1D]">
             {checkedOrder.estimated_completion && (
               <div className="p-3 rounded-xl bg-[#E3EED4] border border-[#375534]/50">
@@ -446,7 +448,6 @@ export default function ServicesTabView({
             )}
           </div>
 
-          {/* Tampilan Pembayaran Tagihan QRIS Saat Produk Selesai Dikerjakan */}
           {checkedOrder.status === 'SIAP_DIBAYAR' && (
             <div className="space-y-4">
               {!checkedOrder.qris_string ? (
@@ -502,7 +503,6 @@ export default function ServicesTabView({
             </div>
           )}
 
-          {/* Tampilan Tombol Unduh Produk Kustom Setelah Dibayar Lunas */}
           {checkedOrder.status === 'LUNAS' && (
             <div className="p-5 rounded-2xl bg-[#E3EED4] border-2 border-[#375534] space-y-3">
               <div className="text-xs sm:text-sm font-extrabold text-[#0F2A1D]">
@@ -607,7 +607,7 @@ export default function ServicesTabView({
       </section>
 
       {/* ==================================================================== */}
-      {/* 3. FORMULIR PESAN LAYANAN KUSTOM (DENGAN PILIHAN EMAIL / BOT TELEGRAM) */}
+      {/* 3. FORMULIR PESAN LAYANAN KUSTOM & KLAIM GARANSI */}
       {/* ==================================================================== */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div
@@ -625,7 +625,6 @@ export default function ServicesTabView({
           </p>
 
           <form onSubmit={handleSendMessage} className="space-y-4">
-            {/* Pilihan Kategori Formulir */}
             <div className="grid grid-cols-3 gap-2 bg-[#F6F8F3] p-1.5 rounded-full border border-[#AEC3B0]/50">
               <button
                 type="button"
@@ -662,9 +661,9 @@ export default function ServicesTabView({
               </button>
             </div>
 
-            {/* Pilihan Saluran Notifikasi Khusus Layanan Kustom (Email / Telegram / Keduanya) */}
+            {/* Pilihan Saluran Notifikasi Khusus Layanan Kustom */}
             {msgType === 'LAYANAN_KHUSUS' && (
-              <div className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 space-y-3">
+              <div className="p-3.5 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 space-y-2.5">
                 <label className="block text-xs font-extrabold text-[#0F2A1D]">
                   Pilih Cara Menerima Kode Pesanan &amp; Notifikasi Tagihan:
                 </label>
@@ -704,39 +703,10 @@ export default function ServicesTabView({
                     📧+🤖 Keduanya
                   </button>
                 </div>
-
-                {/* Kotak Instruksi Wajib Aktifkan Bot Telegram Jika Pilih Telegram / Keduanya */}
-                {needsTelegramInput && (
-                  <div className="p-3.5 rounded-xl bg-[#E3EED4] border border-[#375534] space-y-2 text-xs text-[#0F2A1D]">
-                    <p className="font-extrabold text-[#0F2A1D]">
-                      🤖 Wajib Aktifkan Bot Notifikasi RizzFlow Terlebih Dahulu:
-                    </p>
-                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-[#375534]">
-                      <li>
-                        Klik tombol <strong>Buka @RizzFlow_Notif_bot</strong> di bawah ini, lalu tekan tombol <strong>Start / Mulai</strong> di Telegram kamu agar bot diizinkan mengirim pesan ke kamu.
-                      </li>
-                      <li>
-                        Masukkan <strong>ID Telegram (Angka Chat ID)</strong> kamu pada kolom di bawah (bisa dilihat melalui bot atau <code>@userinfobot</code> di Telegram).
-                      </li>
-                    </ol>
-                    <div className="pt-1">
-                      <a
-                        href={NOTIF_BOT_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] text-xs font-extrabold shadow-2xs transition-colors"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Buka &amp; Aktifkan @RizzFlow_Notif_bot</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
               <input
                 type="text"
                 required
@@ -757,15 +727,26 @@ export default function ServicesTabView({
                 />
               )}
 
+              {/* Kolom ID Telegram + Tautan Ringkas Pembuka Sub-Halaman Mengapung */}
               {needsTelegramInput && (
-                <input
-                  type="text"
-                  required={needsTelegramInput}
-                  value={customerTelegramId}
-                  onChange={(e) => setCustomerTelegramId(e.target.value)}
-                  placeholder="ID Telegram / Chat ID Kamu (Contoh: 123456789) *"
-                  className="w-full px-4 py-3 bg-[#E3EED4]/55 border border-[#375534] rounded-2xl text-xs sm:text-sm font-bold text-[#0F2A1D] focus:outline-none"
-                />
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    required={needsTelegramInput}
+                    value={customerTelegramId}
+                    onChange={(e) => setCustomerTelegramId(e.target.value)}
+                    placeholder="ID Telegram Kamu (Contoh: 123456789) *"
+                    className="w-full px-4 py-3 bg-[#E3EED4]/55 border border-[#375534] rounded-2xl text-xs sm:text-sm font-bold text-[#0F2A1D] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTelegramGuideModal(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#375534] hover:text-[#0F2A1D] underline underline-offset-2 pl-1 transition-colors"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>Cara mendapatkan ID Telegram &amp; Aktivasi Bot</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -930,6 +911,92 @@ export default function ServicesTabView({
           </div>
         </div>
       </section>
+
+      {/* ==================================================================== */}
+      {/* SUB-HALAMAN MENGAPUNG (MODAL): CARA MENDAPATKAN ID TELEGRAM & BOT */}
+      {/* ==================================================================== */}
+      <AnimatePresence>
+        {showTelegramGuideModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowTelegramGuideModal(false)}
+            className="fixed inset-0 z-50 bg-[#0F2A1D]/65 backdrop-blur-xs flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 12 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#F6F8F3] w-full max-w-md rounded-[28px] p-6 shadow-2xl border border-[#AEC3B0] space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-[#AEC3B0]/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <Send className="w-4 h-4 text-[#375534]" />
+                  <h3 className="font-extrabold text-sm sm:text-base text-[#0F2A1D]">
+                    Cara Mendapatkan ID Telegram &amp; Aktivasi Bot
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTelegramGuideModal(false)}
+                  className="w-8 h-8 rounded-full bg-white text-[#0F2A1D] flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs text-[#0F2A1D] leading-relaxed">
+                <div className="p-4 rounded-2xl bg-[#E3EED4] border border-[#375534]/50 space-y-2">
+                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-[10px] font-extrabold">
+                    LANGKAH 1 • WAJIB AKTIFKAN BOT NOTIFIKASI
+                  </span>
+                  <p className="text-[#375534]">
+                    Buka bot resmi RizzFlow di bawah ini lalu tekan tombol <strong>Start / Mulai</strong> di aplikasi Telegram kamu agar bot diizinkan mengirimkan Kode Pesanan &amp; Tagihan ke akunmu:
+                  </p>
+                  <a
+                    href={NOTIF_BOT_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-2.5 px-4 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Buka &amp; Klik Start di @RizzFlow_Notif_bot</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-[#AEC3B0]/60 space-y-2">
+                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#375534] text-white text-[10px] font-extrabold">
+                    LANGKAH 2 • LIHAT ANGKA ID TELEGRAM KAMU
+                  </span>
+                  <p className="text-[#375534]">
+                    Untuk mengetahui deretan angka ID Telegram (Chat ID) milikmu, klik tombol <strong>@userinfobot</strong> di bawah lalu tekan <strong>Start</strong>. Salin angka pada baris <code>Id:</code> (contoh: <code>123456789</code>) dan tempelkan ke kolom formulir.
+                  </p>
+                  <a
+                    href={USERINFOBOT_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-2.5 px-4 rounded-full bg-[#E3EED4] hover:bg-[#375534] text-[#0F2A1D] hover:text-white font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>Cek Angka ID di @userinfobot</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowTelegramGuideModal(false)}
+                className="w-full py-3 rounded-full bg-[#0F2A1D] text-white font-extrabold text-xs"
+              >
+                Sudah Mengerti, Kembali ke Formulir
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

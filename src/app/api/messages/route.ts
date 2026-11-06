@@ -127,17 +127,18 @@ export async function GET(request: Request) {
       .toUpperCase();
 
     if (isPublicConfig) {
-      const config = await getStoredCustomServiceConfig();
-      return NextResponse.json({
-        customServiceConfig: {
-          title: config.title,
-          description: config.description,
-          services: config.services,
-          admin_whatsapp: config.admin_whatsapp,
-          admin_telegram: config.admin_telegram,
-        },
-      });
-    }
+       const config = await getStoredCustomServiceConfig();
+       return NextResponse.json({
+         customServiceConfig: {
+           title: config.title,
+           description: config.description,
+           services: config.services,
+           admin_whatsapp: config.admin_whatsapp,
+           admin_telegram: config.admin_telegram,
+           report_email: config.report_email,
+         },
+       });
+     }
 
     if (orderCodeParam) {
       const allCustomOrders = await getStoredCustomProjectOrders();
@@ -515,14 +516,17 @@ export async function PUT(request: Request) {
       : [];
 
     const newConfig: CustomServiceConfig = {
-      title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
-      description: (body.description || '').trim(),
-      services: cleanServices,
-      admin_whatsapp: (body.admin_whatsapp || '').trim(),
-      admin_telegram: (body.admin_telegram || '').trim(),
-      telegram_bot_token: (body.telegram_bot_token || '').trim(),
-      telegram_chat_id: (body.telegram_chat_id || '').trim(),
-    };
+       title: (body.title || '').trim() || 'Layanan Pembuatan Digital Kustom',
+       description: (body.description || '').trim(),
+       services: cleanServices,
+       admin_whatsapp: (body.admin_whatsapp || '').trim(),
+       admin_telegram: (body.admin_telegram || '').trim(),
+       telegram_bot_token: (body.telegram_bot_token || '').trim(),
+       telegram_chat_id: (body.telegram_chat_id || '').trim(),
+       report_email: (body.report_email || '').trim() || 'rizzflow10@gmail.com',
+       smtp_email: (body.smtp_email || '').trim(),
+       smtp_app_password: (body.smtp_app_password || '').trim(),
+     };
 
     await saveStoredCustomServiceConfig(newConfig);
     return NextResponse.json({

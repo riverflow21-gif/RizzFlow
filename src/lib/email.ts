@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { getStoredCustomServiceConfig } from './supabase';
 
 export interface PurchasedFileLink {
   productTitle: string;
@@ -6,15 +7,15 @@ export interface PurchasedFileLink {
   signedDownloadUrl: string;
 }
 
-function createGmailTransporter() {
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || '')
-    .split(' ')
-    .join('')
-    .trim();
+async function createGmailTransporter() {
+  const cfg = await getStoredCustomServiceConfig();
+
+  const gmailUser = (cfg.smtp_email || process.env.GMAIL_USER || '').trim();
+  const rawPass = cfg.smtp_app_password || process.env.GMAIL_APP_PASSWORD || '';
+  const gmailAppPassword = rawPass.split(' ').join('').trim();
 
   if (!gmailUser || !gmailAppPassword) {
-    console.warn('GMAIL_USER atau GMAIL_APP_PASSWORD belum dikonfigurasi.');
+    console.warn('Email pengirim (Gmail User / App Password) belum diatur.');
     return null;
   }
 
@@ -32,9 +33,6 @@ function createGmailTransporter() {
   };
 }
 
-/**
- * Mengirimkan email produk digital instan (Dual Multipart Text + HTML Anti-Spam).
- */
 export async function sendProductDeliveryEmail(params: {
   toEmail: string;
   invoiceNumber: string;
@@ -44,7 +42,7 @@ export async function sendProductDeliveryEmail(params: {
   const cleanEmail = (params.toEmail || '').trim();
   if (!cleanEmail || !cleanEmail.includes('@')) return;
 
-  const mailSetup = createGmailTransporter();
+  const mailSetup = await createGmailTransporter();
   if (!mailSetup) return;
 
   const plainTextFiles = params.files
@@ -109,13 +107,6 @@ export async function sendProductDeliveryEmail(params: {
   });
 }
 
-/**
- * Mengirimkan email untuk setiap tahapan Transaksi Layanan Kustom:
- * - CREATED: Mengirim Kode Pesanan Kustom (KST-XXXX) saat klien baru memesan.
- * - ACCEPTED_ESTIMATE: Jawaban sementara Admin bahwa pesanan diterima & sedang diproses + estimasi selesai.
- * - BILL_READY: Memberitahu bahwa pesanan telah selesai dikerjakan & silakan lakukan pembayaran tagihan.
- * - PAID_DELIVERY: Mengirim file produk kustom setelah tagihan dibayar lunas.
- */
 export async function sendCustomOrderEmail(params: {
   type: 'CREATED' | 'ACCEPTED_ESTIMATE' | 'BILL_READY' | 'PAID_DELIVERY';
   toEmail: string;
@@ -128,12 +119,11 @@ export async function sendCustomOrderEmail(params: {
   files?: PurchasedFileLink[];
 }): Promise<boolean> {
   const cleanEmail = (params.toEmail || '').trim();
-  // Jika klien memilih hanya menerima via Telegram, jangan kirim email
   if (!cleanEmail || !cleanEmail.includes('@')) {
     return false;
   }
 
-  const mailSetup = createGmailTransporter();
+  const mailSetup = await createGmailTransporter();
   if (!mailSetup) return false;
 
   const appUrl =

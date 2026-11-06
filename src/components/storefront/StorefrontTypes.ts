@@ -22,16 +22,13 @@ export type {
   DeliveryLinkItem,
 };
 
-// 3 Halaman Utama Toko yang Bersih & Fokus (Tanpa Tombol Kembar)
 export type StorefrontTab = 'home' | 'shop' | 'services';
-
-// Mode Filter Cepat pada Halaman Katalog (Shop)
 export type ShopFilterMode = 'ALL' | 'DISCOUNT' | 'CHEAPEST';
 
 export const CART_STORAGE_KEY = 'rizzflow_cart_v1';
 export const PRODUCTS_PER_SLIDE = 6;
 export const VISIBLE_CATEGORY_LIMIT = 5;
-export const LOGO_PATH = '/logo.jpg?v=2';
+export const LOGO_PATH = '/logo.png?v=3';
 
 export const OLD_DEFAULT_DESC =
   'Temukan template Excel, PPT, dan aset desain siap pakai untuk mempercepat produktivitasmu.';
@@ -48,10 +45,6 @@ export interface ProductCardComputedInfo {
   deliverables: ProductDeliverables;
 }
 
-/**
- * Menghitung informasi tampilan kartu produk (Foto sampul, harga coret,
- * dan persentase diskon).
- */
 export function getProductCardInfo(product: Product): ProductCardComputedInfo {
   const thumbList = parseThumbnails(product.thumbnail_url);
   const coverThumb = thumbList[0] || LOGO_PATH;
@@ -74,9 +67,6 @@ export function getProductCardInfo(product: Product): ProductCardComputedInfo {
   };
 }
 
-/**
- * Format angka menjadi mata uang Rupiah yang rapi (Contoh: Rp35.000).
- */
 export function formatRupiah(amount: number): string {
   return `Rp${Math.max(0, amount).toLocaleString('id-ID')}`;
 }
@@ -93,7 +83,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   },
   {
     q: 'Bagaimana alur pemesanan dan pembayaran Layanan Kustom?',
-    a: 'Pilih jenis layanan kustom di halaman Layanan lalu kirim detail permintaanmu. Kamu akan langsung mendapatkan Kode Pesanan (KST-XXXX) di layar dan email. Saat produk kustommu selesai dikerjakan Admin, kamu akan mendapat notifikasi email dan bisa memasukkan kode KST-XXXX tersebut di halaman Layanan untuk membayar tagihan QRIS serta mengunduh produkmu.',
+    a: 'Pilih jenis layanan kustom di halaman Layanan lalu kirim detail permintaanmu. Kamu akan langsung mendapatkan Kode Pesanan (KST-XXXX) melalui Email atau Bot Telegram pilihanmu. Saat produk kustommu selesai dikerjakan Admin, masukkan kode KST-XXXX tersebut di halaman Layanan untuk membayar tagihan QRIS serta mengunduh produkmu.',
   },
   {
     q: 'Apakah saya harus membuat akun atau login terlebih dahulu?',
@@ -101,6 +91,6 @@ export const FAQ_ITEMS: FaqItem[] = [
   },
   {
     q: 'Bagaimana jika email produk belum masuk ke kotak masuk utama?',
-    a: 'Periksa tab Promosi atau folder Spam di aplikasi Gmail kamu. Jika masih belum ditemukan, silakan buka menu Layanan lalu pilih tab Klaim Garansi dengan mencantumkan email atau nomor invoice-mu agar Admin segera mengirimkan ulang.',
+    a: 'Periksa tab Promosi atau folder Spam di aplikasi email kamu. Jika masih belum ditemukan, silakan buka menu Layanan lalu pilih tab Klaim Garansi dengan mencantumkan email atau nomor invoice-mu agar Admin segera mengirimkan ulang.',
   },
 ];
