@@ -7,24 +7,9 @@ export interface PurchasedFileLink {
   signedDownloadUrl: string;
 }
 
-const OFFICIAL_STORE_URL = 'https://rizzflow-theta.vercel.app';
-
-function getPublicStoreUrl(): string {
-  const rawEnv = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
-  if (
-    rawEnv &&
-    !rawEnv.includes('localhost') &&
-    !rawEnv.includes('127.0.0.1')
-  ) {
-    return rawEnv.replace(/\/+$/, '');
-  }
-  return OFFICIAL_STORE_URL;
-}
-
 async function createGmailTransporter() {
   const cfg = await getStoredCustomServiceConfig();
 
-  // Prioritaskan email yang diatur di Admin (misal rizzflow55@gmail.com)
   const adminEmail = (cfg.smtp_email || cfg.report_email || '').trim();
   const envEmail = (process.env.GMAIL_USER || '').trim();
 
@@ -59,8 +44,7 @@ async function createGmailTransporter() {
 }
 
 /**
- * Fungsi khusus untuk mengetes apakah Email Gmail & App Password 16 Digit
- * yang dimasukkan di halaman Admin sudah benar dan bisa mengirim email.
+ * Mengetes pengiriman email dari halaman Pengaturan Admin.
  */
 export async function sendTestAdminEmail(targetEmail?: string): Promise<{
   senderEmail: string;
@@ -68,23 +52,25 @@ export async function sendTestAdminEmail(targetEmail?: string): Promise<{
 }> {
   const mailSetup = await createGmailTransporter();
   const recipient = (targetEmail || '').trim() || mailSetup.gmailUser;
-  const appUrl = getPublicStoreUrl();
 
   await mailSetup.transporter.sendMail({
-    from: `"RizzFlow" <${mailSetup.gmailUser}>`,
+    from: `RizzFlow <${mailSetup.gmailUser}>`,
     replyTo: mailSetup.gmailUser,
     to: recipient,
-    subject: `Tes Pengiriman Email Toko RizzFlow Berhasil!`,
-    text: `Halo Admin RizzFlow,\n\nSelamat! Pengaturan email pengirim (${mailSetup.gmailUser}) dan App Password Gmail 16 digit kamu sudah benar dan aktif.\n\nSekarang setiap pembeli yang berbelanja di ${appUrl} akan langsung menerima email produk secara otomatis.`,
+    subject: 'Konfirmasi pengaturan email RizzFlow',
+    text:
+      `Halo,\n\n` +
+      `Pengaturan email pengirim (${mailSetup.gmailUser}) di toko RizzFlow sudah aktif dan berjalan dengan baik.\n\n` +
+      `Salam hangat,\n` +
+      `RizzFlow`,
     html: `
-      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #AEC3B0; border-radius: 16px; color: #0F2A1D;">
-        <h2 style="margin-top: 0; color: #0F2A1D;">✅ Tes Email RizzFlow Berhasil!</h2>
-        <p style="font-size: 14px; line-height: 1.6; color: #375534;">
-          Selamat! Pengaturan email pengirim <strong>${mailSetup.gmailUser}</strong> beserta <strong>App Password 16 digit</strong> kamu sudah terhubung dengan sempurna.
-        </p>
-        <p style="font-size: 13px; color: #6B9071;">
-          Toko Resmi: <a href="${appUrl}" style="color: #0F2A1D; font-weight: bold;">${appUrl}</a>
-        </p>
+      <div dir="ltr" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #222222; line-height: 1.6;">
+        <p>Halo,</p>
+        <p>Pengaturan email pengirim (<strong>${mailSetup.gmailUser}</strong>) di toko RizzFlow sudah aktif dan berjalan dengan baik.</p>
+        <p>Pesanan pelanggan selanjutnya akan dikirimkan melalui alamat email ini.</p>
+        <br/>
+        <p style="margin: 0;">Salam hangat,</p>
+        <p style="margin: 0;"><strong>RizzFlow</strong></p>
       </div>
     `,
   });
@@ -95,6 +81,11 @@ export async function sendTestAdminEmail(targetEmail?: string): Promise<{
   };
 }
 
+/**
+ * Mengirimkan file produk digital dengan gaya email personal Gmail (<div dir="ltr">)
+ * tanpa header promosi/prioritas palsu dan tanpa link domain gratis berlebih
+ * agar lolos langsung ke Kotak Masuk Utama (Primary Inbox).
+ */
 export async function sendProductDeliveryEmail(params: {
   toEmail: string;
   invoiceNumber: string;
@@ -105,70 +96,62 @@ export async function sendProductDeliveryEmail(params: {
   if (!cleanEmail || !cleanEmail.includes('@')) return;
 
   const mailSetup = await createGmailTransporter();
-  const appUrl = getPublicStoreUrl();
 
   const plainTextFiles = params.files
     .map(
       (item, idx) =>
-        `${idx + 1}. ${item.productTitle} (x${item.quantity})\nLink Unduh: ${item.signedDownloadUrl}`
+        `${idx + 1}. ${item.productTitle} (${item.quantity}x)\nLink akses file: ${item.signedDownloadUrl}`
     )
     .join('\n\n');
 
   const plainTextContent =
     `Halo,\n\n` +
-    `Terima kasih telah berbelanja di RizzFlow (${appUrl}). Pembayaran untuk pesanan ${params.invoiceNumber} sebesar Rp${params.totalPaid.toLocaleString('id-ID')} sudah kami terima.\n\n` +
-    `Berikut adalah link akses produk digital yang kamu pesan:\n\n` +
+    `Terima kasih sudah memesan di RizzFlow. Berikut adalah file untuk pesanan kamu (${params.invoiceNumber}):\n\n` +
     `${plainTextFiles}\n\n` +
-    `Silakan buka link di atas untuk mengunduh file kamu. Jika membutuhkan bantuan, cukup balas langsung email ini.\n\n` +
-    `Salam hangat,\nTim RizzFlow\n${appUrl}`;
+    `Silakan klik link di atas untuk mengunduh file produkmu. Jika ada pertanyaan atau butuh bantuan, kamu cukup membalas langsung pesan email ini.\n\n` +
+    `Salam hangat,\n` +
+    `RizzFlow`;
 
   const fileListHtml = params.files
     .map(
-      (item) => `
-      <div style="padding: 14px; border: 1px solid #AEC3B0; border-radius: 12px; margin-bottom: 10px; background-color: #F6F8F3;">
-        <p style="margin: 0 0 8px 0; font-weight: 700; color: #0F2A1D; font-size: 15px;">
-          ${item.productTitle} (x${item.quantity})
-        </p>
-        <a href="${item.signedDownloadUrl}"
-           style="display: inline-block; background-color: #0F2A1D; color: #E3EED4; text-decoration: none; padding: 10px 18px; border-radius: 999px; font-weight: 700; font-size: 13px;">
-          Buka dan Unduh Produk
-        </a>
-      </div>
+      (item, idx) => `
+      <p style="margin: 0 0 12px 0;">
+        <strong>${idx + 1}. ${item.productTitle} (${item.quantity}x)</strong><br/>
+        File produk: <a href="${item.signedDownloadUrl}" style="color: #1155cc; font-weight: bold; text-decoration: underline;">Klik di sini untuk membuka dan mengunduh file</a>
+      </p>
     `
     )
     .join('');
 
   const htmlContent = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; margin: 0 auto; padding: 22px; color: #0F2A1D; background-color: #FFFFFF; border: 1px solid #AEC3B0; border-radius: 16px;">
-      <p style="font-size: 15px; margin-top: 0;">Halo,</p>
-      <p style="font-size: 14px; line-height: 1.6; color: #375534;">
-        Terima kasih atas pembelianmu di <strong><a href="${appUrl}" style="color: #0F2A1D; text-decoration: none;">RizzFlow</a></strong>. Pembayaran untuk pesanan <strong>${params.invoiceNumber}</strong> (Rp${params.totalPaid.toLocaleString('id-ID')}) telah berhasil kami terima.
-      </p>
-      <div style="margin: 18px 0;">
+    <div dir="ltr" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #222222; line-height: 1.6;">
+      <p>Halo,</p>
+      <p>Terima kasih sudah memesan di RizzFlow. Pembayaran untuk pesanan <strong>${params.invoiceNumber}</strong> sudah kami terima.</p>
+      <p>Berikut adalah akses untuk mengunduh file produk yang kamu pesan:</p>
+      <div style="margin: 16px 0; padding-left: 12px; border-left: 3px solid #375534;">
         ${fileListHtml}
       </div>
-      <p style="color: #6B9071; font-size: 12px; line-height: 1.5; margin-top: 20px; border-top: 1px solid #E3EED4; padding-top: 12px;">
-        Jika kamu membutuhkan bantuan, cukup balas langsung pesan email ini atau kunjungi <a href="${appUrl}" style="color: #375534; font-weight: 700;">${appUrl}</a>.<br/>
-        Salam hangat,<br/>
-        <strong>RizzFlow</strong>
-      </p>
+      <p>Jika kamu membutuhkan bantuan atau ada kendala saat membuka file, silakan balas langsung email ini.</p>
+      <br/>
+      <p style="margin: 0;">Salam hangat,</p>
+      <p style="margin: 0;"><strong>RizzFlow</strong></p>
     </div>
   `;
 
   await mailSetup.transporter.sendMail({
-    from: `"RizzFlow" <${mailSetup.gmailUser}>`,
+    from: `RizzFlow <${mailSetup.gmailUser}>`,
     replyTo: mailSetup.gmailUser,
     to: cleanEmail,
-    subject: `Pesanan RizzFlow kamu sudah siap diakses (${params.invoiceNumber})`,
+    subject: `File pesanan RizzFlow kamu (${params.invoiceNumber})`,
     text: plainTextContent,
     html: htmlContent,
-    headers: {
-      'X-Priority': '1',
-      Importance: 'high',
-    },
   });
 }
 
+/**
+ * Mengirimkan email untuk Layanan Kustom dengan format personal bersih
+ * agar masuk ke Kotak Masuk Utama (Primary Inbox).
+ */
 export async function sendCustomOrderEmail(params: {
   type: 'CREATED' | 'ACCEPTED_ESTIMATE' | 'BILL_READY' | 'PAID_DELIVERY';
   toEmail: string;
@@ -186,102 +169,104 @@ export async function sendCustomOrderEmail(params: {
   }
 
   const mailSetup = await createGmailTransporter();
-  const appUrl = getPublicStoreUrl();
 
-  let subject = `Kode Pesanan Layanan Kustom RizzFlow (${params.orderCode})`;
-  let headline = '';
-  let bodyParagraph = '';
+  let subject = `Pesanan layanan kustom RizzFlow (${params.orderCode})`;
+  let introParagraph = '';
+  let stepInstruction = '';
 
   if (params.type === 'CREATED') {
-    subject = `Kode Pesanan Layanan Kustom RizzFlow kamu: ${params.orderCode}`;
-    headline = 'Permintaan Layanan Kustom Kamu Telah Kami Terima';
-    bodyParagraph = `Terima kasih telah memesan layanan kustom "${params.projectTitle}" di RizzFlow. Simpan Kode Pesanan kamu: ${params.orderCode}. Kamu dapat mengecek progres pengerjaan, estimasi selesai, dan melakukan pembayaran nantinya menggunakan kode tersebut di menu Layanan website RizzFlow (${appUrl}).`;
+    subject = `Kode pesanan layanan kustom RizzFlow kamu (${params.orderCode})`;
+    introParagraph = `Terima kasih sudah memesan layanan kustom "${params.projectTitle}" di RizzFlow. Kode pesanan kamu adalah ${params.orderCode}.`;
+    stepInstruction = `Simpan kode pesanan ${params.orderCode} tersebut untuk melihat progres pengerjaan dan menyelesaikan pembayaran di menu Layanan pada website RizzFlow (rizzflow-theta.vercel.app).`;
   } else if (params.type === 'ACCEPTED_ESTIMATE') {
-    subject = `Pesanan Kustom ${params.orderCode} Diterima dan Sedang Diproses`;
-    headline = 'Pesanan Kamu Diterima & Sedang Kami Kerjakan!';
-    bodyParagraph = `Admin RizzFlow telah menerima dan mulai memproses pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode}.`;
+    subject = `Update pengerjaan pesanan ${params.orderCode} - RizzFlow`;
+    introParagraph = `Pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode} sudah kami terima dan saat ini sedang kami kerjakan.`;
+    stepInstruction = `Kamu bisa memantau progresnya kapan saja dengan memasukkan kode ${params.orderCode} di menu Layanan website RizzFlow (rizzflow-theta.vercel.app).`;
   } else if (params.type === 'BILL_READY') {
-    subject = `Pesanan Kustom ${params.orderCode} Telah Selesai - Silakan Lakukan Pembayaran`;
-    headline = 'Produk Kustom Kamu Sudah Selesai Dikerjakan!';
-    bodyParagraph = `Kabar gembira! Pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode} telah selesai kami siapkan dengan total tagihan Rp${(params.price || 0).toLocaleString('id-ID')}. Silakan buka menu Layanan di website RizzFlow (${appUrl}), masukkan kode ${params.orderCode}, dan lakukan pembayaran via QRIS agar file produkmu langsung terkirim otomatis.`;
+    subject = `Pesanan kustom ${params.orderCode} sudah selesai dikerjakan`;
+    introParagraph = `Pesanan layanan kustom "${params.projectTitle}" dengan kode ${params.orderCode} sudah selesai kami siapkan.`;
+    stepInstruction = `Silakan buka menu Layanan di website RizzFlow (rizzflow-theta.vercel.app) lalu masukkan kode pesanan ${params.orderCode} untuk menyelesaikan pembayaran sebesar Rp${(params.price || 0).toLocaleString('id-ID')} dan mengunduh file hasil pengerjaannya.`;
   } else {
-    subject = `File Produk Kustom RizzFlow Kamu (${params.orderCode})`;
-    headline = 'Pembayaran Berhasil — Berikut Produk Kustom Kamu';
-    bodyParagraph = `Terima kasih! Pembayaran untuk pesanan kustom ${params.orderCode} telah kami terima. Silakan akses dan unduh produk kustom kamu melalui tombol di bawah ini:`;
+    subject = `File hasil pesanan kustom RizzFlow (${params.orderCode})`;
+    introParagraph = `Terima kasih, pembayaran untuk pesanan layanan kustom ${params.orderCode} ("${params.projectTitle}") sudah kami terima.`;
+    stepInstruction = `Silakan gunakan link di bawah ini untuk mengunduh hasil pengerjaan produk kustom kamu:`;
   }
-
-  const estimateHtml = params.estimatedCompletion
-    ? `<div style="padding: 12px 14px; background-color: #E3EED4; border: 1px solid #375534; border-radius: 10px; margin: 12px 0; font-size: 13px; color: #0F2A1D;">
-        <strong>⏱️ Estimasi Pengerjaan Sampai Selesai:</strong><br/>
-        <span style="font-size: 15px; font-weight: 800; color: #375534;">${params.estimatedCompletion}</span>
-       </div>`
-    : '';
 
   const filesHtml =
     params.files && params.files.length > 0
       ? params.files
           .map(
-            (f) => `
-          <div style="padding: 14px; border: 1px solid #AEC3B0; border-radius: 12px; margin-top: 10px; background-color: #F6F8F3;">
-            <p style="margin: 0 0 8px 0; font-weight: 700; color: #0F2A1D; font-size: 14px;">${f.productTitle}</p>
-            <a href="${f.signedDownloadUrl}" style="display: inline-block; background-color: #0F2A1D; color: #E3EED4; text-decoration: none; padding: 9px 16px; border-radius: 999px; font-weight: 700; font-size: 12px;">
-              Unduh File Produk Kustom
-            </a>
-          </div>`
+            (f, i) => `
+          <p style="margin: 0 0 10px 0;">
+            <strong>${i + 1}. ${f.productTitle}</strong><br/>
+            Link file: <a href="${f.signedDownloadUrl}" style="color: #1155cc; font-weight: bold; text-decoration: underline;">Klik di sini untuk mengunduh produk kustom</a>
+          </p>`
           )
           .join('')
       : '';
 
+  const plainTextFiles =
+    params.files && params.files.length > 0
+      ? params.files
+          .map((f, i) => `${i + 1}. ${f.productTitle}\nLink: ${f.signedDownloadUrl}`)
+          .join('\n\n')
+      : '';
+
   const plainText =
     `Halo ${params.customerName},\n\n` +
-    `${headline}\n` +
-    `Kode Pesanan Kustom: ${params.orderCode}\n\n` +
-    `${bodyParagraph}\n\n` +
+    `${introParagraph}\n\n` +
+    `Kode Pesanan: ${params.orderCode}\n` +
     (params.estimatedCompletion
-      ? `Estimasi Pengerjaan Sampai Selesai: ${params.estimatedCompletion}\n\n`
+      ? `Estimasi Selesai: ${params.estimatedCompletion}\n`
       : '') +
     (params.price && params.price > 0
-      ? `Total Tagihan: Rp${params.price.toLocaleString('id-ID')}\n\n`
+      ? `Nominal Tagihan: Rp${params.price.toLocaleString('id-ID')}\n`
       : '') +
-    (params.adminNote ? `Pesan / Catatan Admin:\n${params.adminNote}\n\n` : '') +
-    `Cek Kode Pesanan di Website RizzFlow: ${appUrl}\n\n` +
-    `Salam hangat,\nTim RizzFlow`;
+    (params.adminNote ? `Catatan Admin: ${params.adminNote}\n` : '') +
+    `\n${stepInstruction}\n\n` +
+    (plainTextFiles ? `${plainTextFiles}\n\n` : '') +
+    `Jika ada yang ingin ditanyakan, silakan balas langsung email ini.\n\n` +
+    `Salam hangat,\n` +
+    `RizzFlow`;
 
   const htmlContent = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; margin: 0 auto; padding: 22px; color: #0F2A1D; background-color: #FFFFFF; border: 1px solid #AEC3B0; border-radius: 16px;">
-      <p style="font-size: 15px; margin-top: 0;">Halo <strong>${params.customerName}</strong>,</p>
-      <div style="padding: 14px 16px; border-radius: 12px; background-color: #0F2A1D; color: #E3EED4; margin-bottom: 14px;">
-        <span style="font-size: 11px; color: #AEC3B0; font-weight: 800;">KODE PESANAN LAYANAN KUSTOM KAMU</span>
-        <div style="font-size: 24px; font-weight: 800; color: #FFFFFF; letter-spacing: 1.5px; margin-top: 2px;">${params.orderCode}</div>
+    <div dir="ltr" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #222222; line-height: 1.6;">
+      <p>Halo <strong>${params.customerName}</strong>,</p>
+      <p>${introParagraph}</p>
+      <div style="margin: 14px 0; padding: 12px 14px; background-color: #f6f8f3; border-left: 3px solid #375534;">
+        <p style="margin: 0 0 4px 0;"><strong>Kode Pesanan:</strong> ${params.orderCode}</p>
+        ${
+          params.estimatedCompletion
+            ? `<p style="margin: 0 0 4px 0;"><strong>Estimasi Selesai:</strong> ${params.estimatedCompletion}</p>`
+            : ''
+        }
+        ${
+          params.price && params.price > 0
+            ? `<p style="margin: 0 0 4px 0;"><strong>Rincian Biaya:</strong> Rp${params.price.toLocaleString('id-ID')}</p>`
+            : ''
+        }
+        ${
+          params.adminNote
+            ? `<p style="margin: 0;"><strong>Pesan Admin:</strong> ${params.adminNote}</p>`
+            : ''
+        }
       </div>
-      <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #0F2A1D;">${headline}</h3>
-      <p style="font-size: 14px; line-height: 1.6; color: #375534;">${bodyParagraph}</p>
-      ${estimateHtml}
-      ${
-        params.adminNote
-          ? `<div style="padding: 12px; background-color: #F6F8F3; border: 1px solid #AEC3B0; border-radius: 10px; margin: 12px 0; font-size: 13px; color: #0F2A1D;">
-              <strong>Keterangan Admin:</strong><br/>${params.adminNote}
-             </div>`
-          : ''
-      }
-      ${filesHtml}
-      <p style="font-size: 12px; color: #6B9071; margin-top: 18px; border-top: 1px solid #E3EED4; padding-top: 12px;">
-        Buka menu <strong>Layanan</strong> di <a href="${appUrl}" style="color: #375534; font-weight: 700;">${appUrl}</a> dan masukkan kode <strong>${params.orderCode}</strong> untuk melihat status atau menyelesaikan pembayaran.
-      </p>
+      <p>${stepInstruction}</p>
+      ${filesHtml ? `<div style="margin: 14px 0;">${filesHtml}</div>` : ''}
+      <p>Jika ada pertanyaan, kamu cukup membalas langsung pesan email ini.</p>
+      <br/>
+      <p style="margin: 0;">Salam hangat,</p>
+      <p style="margin: 0;"><strong>RizzFlow</strong></p>
     </div>
   `;
 
   await mailSetup.transporter.sendMail({
-    from: `"RizzFlow" <${mailSetup.gmailUser}>`,
+    from: `RizzFlow <${mailSetup.gmailUser}>`,
     replyTo: mailSetup.gmailUser,
     to: cleanEmail,
     subject,
     text: plainText,
     html: htmlContent,
-    headers: {
-      'X-Priority': '1',
-      Importance: 'high',
-    },
   });
 
   return true;

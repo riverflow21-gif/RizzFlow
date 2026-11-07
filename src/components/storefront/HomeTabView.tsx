@@ -64,7 +64,6 @@ export default function HomeTabView({
       ? NEW_GENERAL_DESC
       : settings.banner_description;
 
-  // Menampilkan 4 produk unggulan di Beranda ("Pilihan Terbaik Untukmu")
   const featuredProducts = products.slice(0, 4);
 
   const handleQuickSearchSubmit = (e: React.FormEvent) => {
@@ -75,7 +74,7 @@ export default function HomeTabView({
   return (
     <div className="space-y-7 pb-8">
       {/* ==================================================================== */}
-      {/* BLOK ATAS HIJAU HUTAN GELAP (#0F2A1D) — BERSIH TANPA TOMBOL GANDA */}
+      {/* BLOK ATAS HIJAU HUTAN GELAP (#0F2A1D) */}
       {/* ==================================================================== */}
       <section className="bg-[#0F2A1D] text-[#E3EED4] rounded-b-[36px] pt-5 pb-8 px-4 sm:px-8 relative overflow-hidden shadow-lg">
         <div className="w-64 h-64 rounded-full bg-[#375534]/40 blur-3xl absolute -top-20 -right-16 pointer-events-none" />
@@ -86,10 +85,10 @@ export default function HomeTabView({
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
-  src={LOGO_PATH}
-  alt={settings.store_name}
-  className="h-11 w-11 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
-/>
+                src={LOGO_PATH}
+                alt={settings.store_name}
+                className="h-11 w-11 rounded-2xl object-cover border border-[#6B9071]/40 shrink-0 shadow-xs"
+              />
               <div className="min-w-0">
                 <span className="block font-extrabold text-base sm:text-lg tracking-tight text-white truncate">
                   {settings.store_name}
@@ -129,7 +128,7 @@ export default function HomeTabView({
             </button>
           </form>
 
-          {/* Kartu Hero Utama Melengkung (Gaya Banner Gambar 1 & Gambar 2) */}
+          {/* Kartu Hero Utama Melengkung */}
           <div className="rounded-[28px] bg-gradient-to-br from-[#375534] via-[#466943] to-[#6B9071] p-6 sm:p-8 border border-[#AEC3B0]/35 relative overflow-hidden shadow-md">
             <div className="w-44 h-44 rounded-full bg-[#E3EED4]/15 blur-xl absolute -right-10 -bottom-10 pointer-events-none" />
 
@@ -171,47 +170,142 @@ export default function HomeTabView({
             </div>
           </div>
 
-          {/* 3 Badge Keunggulan Utama (Bukan Tombol Navigasi Kembar) */}
+          {/* ================================================================ */}
+          {/* 3 GELEMBUNG KEUNGGULAN DENGAN ANIMASI TEKS BERJALAN (MARQUEE) */}
+          {/* ================================================================ */}
           <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-1">
-            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+            {/* Gelembung 1: Akses Instan */}
+            <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <Zap className="w-3.5 h-3.5" />
               </div>
-              <div className="min-w-0">
-                <span className="block text-[11px] font-extrabold text-white truncate">
-                  Akses Instan
-                </span>
-                <span className="block text-[10px] text-[#AEC3B0] truncate">
-                  Terkirim detik itu juga
-                </span>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <div className="overflow-hidden whitespace-nowrap">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 8,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[11px] font-extrabold text-white">
+                      Akses Instan 24/7 • Pengiriman Otomatis
+                    </span>
+                    <span className="text-[11px] font-extrabold text-white">
+                      Akses Instan 24/7 • Pengiriman Otomatis
+                    </span>
+                  </motion.div>
+                </div>
+                <div className="overflow-hidden whitespace-nowrap mt-0.5">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 10,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      File langsung terkirim detik itu juga ke emailmu
+                    </span>
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      File langsung terkirim detik itu juga ke emailmu
+                    </span>
+                  </motion.div>
+                </div>
               </div>
             </div>
 
-            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+            {/* Gelembung 2: QRIS Resmi */}
+            <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <QrCode className="w-3.5 h-3.5" />
               </div>
-              <div className="min-w-0">
-                <span className="block text-[11px] font-extrabold text-white truncate">
-                  QRIS Resmi
-                </span>
-                <span className="block text-[10px] text-[#AEC3B0] truncate">
-                  Tanpa daftar akun
-                </span>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <div className="overflow-hidden whitespace-nowrap">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 8.5,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[11px] font-extrabold text-white">
+                      QRIS Resmi • Semua E-Wallet &amp; Bank
+                    </span>
+                    <span className="text-[11px] font-extrabold text-white">
+                      QRIS Resmi • Semua E-Wallet &amp; Bank
+                    </span>
+                  </motion.div>
+                </div>
+                <div className="overflow-hidden whitespace-nowrap mt-0.5">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 10.5,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      Belanja praktis tanpa perlu daftar akun atau login
+                    </span>
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      Belanja praktis tanpa perlu daftar akun atau login
+                    </span>
+                  </motion.div>
+                </div>
               </div>
             </div>
 
-            <div className="px-3 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2">
+            {/* Gelembung 3: Garansi 100% */}
+            <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-3.5 h-3.5" />
               </div>
-              <div className="min-w-0">
-                <span className="block text-[11px] font-extrabold text-white truncate">
-                  Garansi 100%
-                </span>
-                <span className="block text-[10px] text-[#AEC3B0] truncate">
-                  Aman &amp; terjamin
-                </span>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <div className="overflow-hidden whitespace-nowrap">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 9,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[11px] font-extrabold text-white">
+                      Garansi 100% • Layanan Resmi RizzFlow
+                    </span>
+                    <span className="text-[11px] font-extrabold text-white">
+                      Garansi 100% • Layanan Resmi RizzFlow
+                    </span>
+                  </motion.div>
+                </div>
+                <div className="overflow-hidden whitespace-nowrap mt-0.5">
+                  <motion.div
+                    animate={{ x: ['0%', '-50%'] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 11,
+                      ease: 'linear',
+                    }}
+                    className="inline-flex items-center gap-6"
+                  >
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      Aman, terpercaya, dan bergaransi bantuan penuh
+                    </span>
+                    <span className="text-[10px] text-[#AEC3B0]">
+                      Aman, terpercaya, dan bergaransi bantuan penuh
+                    </span>
+                  </motion.div>
+                </div>
               </div>
             </div>
           </div>
@@ -222,7 +316,6 @@ export default function HomeTabView({
       {/* KONTEN UTAMA BERANDA (LATAR ALABASTER LEMBUT #F6F8F3) */}
       {/* ==================================================================== */}
       <div className="max-w-5xl mx-auto px-4 space-y-8">
-        {/* Deretan Kategori Kapsul (Seperti "Categories" + "See all" di Gambar 1) */}
         {categories.length > 0 && (
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -260,7 +353,6 @@ export default function HomeTabView({
           </section>
         )}
 
-        {/* Seksi "Pilihan Terbaik Untukmu" (Gaya Kartu Gambar 1 & Gambar 2) */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -303,7 +395,6 @@ export default function HomeTabView({
                       onClick={() => onSelectProduct(product)}
                       className="cursor-pointer"
                     >
-                      {/* Bingkai Foto Krem Pistachio (#E3EED4) */}
                       <div className="relative aspect-[4/3] rounded-[18px] bg-[#E3EED4]/65 overflow-hidden mb-3">
                         <img
                           src={info.coverThumb}
@@ -339,7 +430,6 @@ export default function HomeTabView({
                       </div>
                     </div>
 
-                    {/* Baris Bawah Kartu: Harga di Kiri & Tombol Bulat (+) di Kanan */}
                     <div className="px-1 pt-1 flex items-end justify-between gap-2">
                       <div className="min-w-0">
                         {info.hasDiscount && info.origPrice && (
@@ -377,7 +467,6 @@ export default function HomeTabView({
           )}
         </section>
 
-        {/* Kartu Highlight Layanan Kustom Berwarna Krem Pistachio (#E3EED4) */}
         <section className="rounded-[28px] bg-[#E3EED4] border border-[#AEC3B0] p-5 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="space-y-2 max-w-xl">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#375534] text-[11px] font-extrabold">
