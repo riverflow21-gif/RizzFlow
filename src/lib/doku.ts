@@ -1,73 +1,30 @@
 import crypto from 'crypto';
-import { DokuQrisResponse, PromoCode, PromoValidationResult } from '@/types';
 
-/**
- * Menghitung potongan harga berdasarkan aturan kode promo di PRD:
- * 1. Cek apakah promo aktif dan berada dalam rentang waktu mulai s/d berakhir.
- * 2. Hitung diskon = Subtotal * (Persentase / 100).
- * 3. Jika diskon melebihi Maksimal Potongan (Rp), kunci nilai diskon pada batas maksimal tersebut.
- */
-export function calculatePromoDiscount(
-  subtotal: number,
-  promo: PromoCode | null
-): PromoValidationResult {
-  if (!promo || !promo.is_active) {
-    return {
-      valid: false,
-      message: 'Kode promo tidak ditemukan atau sudah tidak aktif.',
-      discount_amount: 0,
-      promo_code: null,
-    };
-  }
-
-  const now = new Date();
-  const startsAt = new Date(promo.starts_at);
-  const expiresAt = new Date(promo.expires_at);
-
-  if (now < startsAt) {
-    return {
-      valid: false,
-      message: 'Kode promo ini belum memasuki periode aktif.',
-      discount_amount: 0,
-      promo_code: null,
-    };
-  }
-
-  if (now > expiresAt) {
-    return {
-      valid: false,
-      message: 'Masa berlaku kode promo ini sudah habis.',
-      discount_amount: 0,
-      promo_code: null,
-    };
-  }
-
-  const rawDiscount = Math.floor(subtotal * (promo.discount_percent / 100));
-  const cappedDiscount = Math.min(rawDiscount, promo.max_discount_amount);
-  const finalDiscount = Math.min(cappedDiscount, subtotal);
-
-  return {
-    valid: true,
-    message: `Kode promo ${promo.code} berhasil dipasang! Hemat Rp${finalDiscount.toLocaleString('id-ID')}.`,
-    discount_amount: finalDiscount,
-    promo_code: promo.code,
-  };
+export interface DokuQrisResult {
+  qris_string: string;
+  expires_at: string;
 }
 
-/**
- * Membuat Signature keamanan HMAC-SHA256 sesuai standar DOKU API.
- */
-export function generateDokuSignature(params: {
+function getDokuBaseUrl(): string {
+  const customUrl = (process.env.DOKU_API_BASE_URL || '').trim();
+  if (customUrl) {
+    return customUrl.replace(/\/+$/, '');
+  }
+  const isProd = process.env.DOKU_IS_PRODUCTION === 'true';
+  return isProd ? 'https://api.doku.com' : 'https://api-sandbox.doku.com';
+}
+
+function generateDokuSignature(params: {
   clientId: string;
   requestId: string;
   requestTimestamp: string;
   requestTarget: string;
-  bodyString: string;
+  rawBody: string;
   secretKey: string;
 }): string {
   const digest = crypto
     .createHash('sha256')
-    .update(params.bodyString, 'utf8')
+    .update(params.rawBody, 'utf8')
     .digest('base64');
 
   const componentSignature =
@@ -85,56 +42,64 @@ export function generateDokuSignature(params: {
   return `HMACSHA256=${hmac}`;
 }
 
-/**
- * Meminta pembuatan tagihan QRIS ke DOKU dengan durasi kedaluwarsa tepat 60 menit (1 jam).
- */
 export async function createDokuQrisPayment(params: {
   invoiceNumber: string;
   amount: number;
   customerEmail: string;
-}): Promise<DokuQrisResponse> {
-  // Waktu kedaluwarsa dikunci 60 menit (1 jam) dari waktu pemesanan
-  const expiresAtDate = new Date(Date.now() + 60 * 60 * 1000);
-  const expiresAtIso = expiresAtDate.toISOString();
+}): Promise<DokuQrisResult> {
+  const isSimulation = process.env.DOKU_SIMULATION_MODE === 'true';
+  const clientId = (process.env.DOKU_CLIENT_ID || '').trim();
+  const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
+  const expiresAtIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-  // Jika mode simulasi aktif, hasilkan string QRIS simulasi agar pemilik toko mudah menguji di laptop
-  if (process.env.DOKU_SIMULATION_MODE === 'true') {
-    const simulatedQrString = `00020101021226610014ID.CO.DOKU.WWW01189360089900000000010215${params.invoiceNumber}520458125303360540${params.amount}5802ID5908RIZZFLOW6007JAKARTA6304ABCD`;
+  if (isSimulation) {
+    const dummyQris = `00020101021226660014ID.CO.DOKU.WWW01189360089900000000000215${params.invoiceNumber}520458125303360540${params.amount}5802ID5908RIZZFLOW6007JAKARTA6304ABCD`;
     return {
-      qris_string: simulatedQrString,
+      qris_string: dummyQris,
       expires_at: expiresAtIso,
     };
   }
 
-  const clientId = process.env.DOKU_CLIENT_ID || '';
-  const secretKey = process.env.DOKU_SECRET_KEY || '';
-  const baseUrl = process.env.DOKU_BASE_URL || 'https://api-sandbox.doku.com';
-  const requestTarget = '/checkout/v1/payment';
+  if (!clientId || !secretKey) {
+    throw new Error(
+      'DOKU_CLIENT_ID atau DOKU_SECRET_KEY belum diisi di Environment Variables Vercel.'
+    );
+  }
+
+  const baseUrl = getDokuBaseUrl();
   const requestId = crypto.randomUUID();
   const requestTimestamp = new Date().toISOString().slice(0, 19) + 'Z';
+  const requestTarget =
+    (process.env.DOKU_QRIS_ENDPOINT || '').trim() || '/checkout/v1/payment';
 
-  const requestBody = {
+  const webhookUrl = 'https://rizzflow-theta.vercel.app/api/webhooks/doku';
+
+  const requestBodyObj = {
     order: {
-      amount: params.amount,
+      amount: Math.round(params.amount),
       invoice_number: params.invoiceNumber,
       currency: 'IDR',
+      callback_url: 'https://rizzflow-theta.vercel.app/checkout',
+      notification_url: webhookUrl,
     },
     payment: {
-      payment_due_date: 60, // Kedaluwarsa tepat 60 menit (1 jam)
+      payment_due_date: 60,
       payment_method_types: ['QRIS'],
     },
     customer: {
+      id: params.customerEmail,
+      name: params.customerEmail.split('@')[0] || 'Customer',
       email: params.customerEmail,
     },
   };
 
-  const bodyString = JSON.stringify(requestBody);
+  const rawBody = JSON.stringify(requestBodyObj);
   const signature = generateDokuSignature({
     clientId,
     requestId,
     requestTimestamp,
     requestTarget,
-    bodyString,
+    rawBody,
     secretKey,
   });
 
@@ -147,27 +112,40 @@ export async function createDokuQrisPayment(params: {
       'Request-Timestamp': requestTimestamp,
       Signature: signature,
     },
-    body: bodyString,
+    body: rawBody,
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gagal membuat QRIS DOKU: ${errText}`);
-  }
-
-  const result = (await response.json()) as {
+  const data = (await response.json()) as {
+    message?: string[];
+    error?: { message?: string };
     response?: {
       payment?: {
         qr_string?: string;
+        qris_string?: string;
         url?: string;
       };
     };
+    qr_string?: string;
   };
 
+  if (!response.ok) {
+    const errDetail =
+      data?.error?.message ||
+      (Array.isArray(data?.message) ? data.message.join(', ') : '') ||
+      `HTTP ${response.status}`;
+    throw new Error(`DOKU Error: ${errDetail}`);
+  }
+
   const qrisString =
-    result.response?.payment?.qr_string ||
-    result.response?.payment?.url ||
-    `RIZZFLOW-QRIS-${params.invoiceNumber}`;
+    data?.response?.payment?.qr_string ||
+    data?.response?.payment?.qris_string ||
+    data?.qr_string ||
+    data?.response?.payment?.url ||
+    '';
+
+  if (!qrisString) {
+    throw new Error('Respons DOKU tidak menyertakan URL/kode QRIS.');
+  }
 
   return {
     qris_string: qrisString,
@@ -175,32 +153,24 @@ export async function createDokuQrisPayment(params: {
   };
 }
 
-/**
- * Memverifikasi keaslian Signature dari Webhook DOKU agar tidak bisa dipalsukan pihak luar.
- */
 export function verifyDokuWebhookSignature(params: {
-  clientIdHeader: string;
-  requestIdHeader: string;
-  requestTimestampHeader: string;
-  signatureHeader: string;
-  requestTarget: string;
+  requestId: string;
+  requestTimestamp: string;
   rawBody: string;
+  signatureHeader: string;
 }): boolean {
-  if (process.env.DOKU_SIMULATION_MODE === 'true') {
-    return true;
-  }
+  const clientId = (process.env.DOKU_CLIENT_ID || '').trim();
+  const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
+  if (!clientId || !secretKey) return false;
 
-  const secretKey = process.env.DOKU_SECRET_KEY || '';
-  if (!secretKey) return false;
-
-  const expectedSignature = generateDokuSignature({
-    clientId: params.clientIdHeader,
-    requestId: params.requestIdHeader,
-    requestTimestamp: params.requestTimestampHeader,
-    requestTarget: params.requestTarget,
-    bodyString: params.rawBody,
+  const expected = generateDokuSignature({
+    clientId,
+    requestId: params.requestId,
+    requestTimestamp: params.requestTimestamp,
+    requestTarget: '/api/webhooks/doku',
+    rawBody: params.rawBody,
     secretKey,
   });
 
-  return params.signatureHeader === expectedSignature;
+  return params.signatureHeader === expected;
 }

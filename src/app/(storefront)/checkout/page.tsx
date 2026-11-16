@@ -439,19 +439,43 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
-                  <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs">
-                    {activeOrder.qris_string ? (
-                      React.createElement(QRCodeSVG, {
-                        value: activeOrder.qris_string,
-                        size: 210,
-                      })
-                    ) : (
-                      <div className="w-48 h-48 flex items-center justify-center text-xs text-[#6B9071]">
-                        QRIS tidak tersedia
+                <div className="w-full">
+                  {activeOrder.qris_string &&
+                  activeOrder.qris_string.startsWith('http') ? (
+                    <div className="space-y-3">
+                      <div className="w-full rounded-[24px] overflow-hidden border-2 border-[#6B9071] bg-white shadow-sm">
+                        <iframe
+                          src={activeOrder.qris_string}
+                          title="Pembayaran QRIS Resmi DOKU"
+                          className="w-full h-[460px] border-0"
+                        />
                       </div>
-                    )}
-                  </div>
+                      <a
+                        href={activeOrder.qris_string}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#E3EED4] hover:bg-[#375534] text-[#0F2A1D] hover:text-white text-xs font-extrabold transition-colors"
+                      >
+                        <QrCode className="w-4 h-4" />
+                        <span>Buka Halaman QRIS di Tab Baru (Jika Belum Muncul)</span>
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
+                      <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs">
+                        {activeOrder.qris_string ? (
+                          React.createElement(QRCodeSVG, {
+                            value: activeOrder.qris_string,
+                            size: 210,
+                          })
+                        ) : (
+                          <div className="w-48 h-48 flex items-center justify-center text-xs text-[#6B9071]">
+                            QRIS tidak tersedia
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <p className="text-xs text-[#6B9071] max-w-sm mx-auto leading-relaxed">
