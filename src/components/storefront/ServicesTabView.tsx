@@ -633,7 +633,7 @@ export default function ServicesTabView({
                         ) : (
                           <>
                             <Download className="w-4 h-4" />
-                            <span>Simpan Gambar QRIS (.PNG)</span>
+                            <span>Simpan Gambar QRIS</span>
                           </>
                         )}
                       </motion.button>
