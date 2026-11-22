@@ -2,21 +2,21 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import {
   getSupabaseAdmin,
+  generateProductSignedUrl,
   getStoredCustomerMessages,
   saveStoredCustomerMessages,
   getStoredCustomServiceConfig,
   saveStoredCustomServiceConfig,
   getStoredCustomProjectOrders,
   saveStoredCustomProjectOrders,
-  buildProductDeliveryItems,
   sendAdminTelegramNotification,
-  sendClientTelegramNotification,
   CustomerSupportMessage,
   CustomServiceConfig,
   CustomProjectOrder,
-  CustomNotificationChannel,
+  CustomOrderStatus,
+  DeliveryLinkItem,
 } from '@/lib/supabase';
-import { createDokuQrisPayment } from '@/lib/doku';
+import { createDokuQrisPayment, checkDokuOrderStatus } from '@/lib/doku';
 import { sendCustomOrderEmail, PurchasedFileLink } from '@/lib/email';
 
 async function verifyAdminAuth(request: Request): Promise<boolean> {
@@ -31,98 +31,153 @@ async function verifyAdminAuth(request: Request): Promise<boolean> {
 
 function generateCustomOrderCode(existing: CustomProjectOrder[]): string {
   const used = new Set(existing.map((o) => o.order_code));
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 60; i++) {
     const code = `KST-${Math.floor(1000 + Math.random() * 9000)}`;
     if (!used.has(code)) return code;
   }
   return `KST-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
-/**
- * Mengirim notifikasi ke Klien sesuai saluran yang dipilihnya (EMAIL, TELEGRAM, atau BOTH).
- */
-async function dispatchClientCustomNotification(params: {
-  order: CustomProjectOrder;
-  type: 'CREATED' | 'ACCEPTED_ESTIMATE' | 'BILL_READY' | 'PAID_DELIVERY';
-  files?: PurchasedFileLink[];
-}): Promise<void> {
-  const channel: CustomNotificationChannel =
-    params.order.notify_channel || 'EMAIL';
-  const sendEmail = channel === 'EMAIL' || channel === 'BOTH';
-  const sendTg = channel === 'TELEGRAM' || channel === 'BOTH';
+async function buildCustomOrderDeliveryItems(
+  order: CustomProjectOrder
+): Promise<DeliveryLinkItem[]> {
+  const results: DeliveryLinkItem[] = [];
+  const files = Array.isArray(order.file_paths) ? order.file_paths : [];
+  const links = Array.isArray(order.delivery_links) ? order.delivery_links : [];
+  const total = files.length + links.length;
 
-  // Pastikan Bot Telegram selalu mengirim link resmi https://rizzflow-theta.vercel.app
-  const rawEnvUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
-  const appUrl =
-    rawEnvUrl &&
-    !rawEnvUrl.includes('localhost') &&
-    !rawEnvUrl.includes('127.0.0.1')
-      ? rawEnvUrl.replace(/\/+$/, '')
-      : 'https://rizzflow-theta.vercel.app';
-
-  // 1. Kirim via Email (Hanya jika klien memilih EMAIL atau BOTH dan mengisi email)
-  if (sendEmail && params.order.customer_email) {
+  for (let i = 0; i < files.length; i++) {
     try {
-      await sendCustomOrderEmail({
-        type: params.type,
-        toEmail: params.order.customer_email,
-        customerName: params.order.customer_name,
-        orderCode: params.order.order_code,
-        projectTitle: params.order.project_title,
-        estimatedCompletion: params.order.estimated_completion,
-        price: params.order.price,
-        adminNote: params.order.admin_note,
-        files: params.files,
+      const signedUrl = await generateProductSignedUrl(files[i]);
+      results.push({
+        productTitle:
+          total > 1
+            ? `${order.project_title} — File ${i + 1}`
+            : order.project_title,
+        quantity: 1,
+        signedDownloadUrl: signedUrl,
       });
     } catch (e) {
-      console.error('Gagal mengirim email layanan kustom ke klien:', e);
+      console.error('Gagal buat signed url file kustom:', e);
     }
   }
 
-  // 2. Kirim via Bot Telegram @RizzFlow_Notif_bot (Jika klien memilih TELEGRAM atau BOTH)
-  if (sendTg && params.order.customer_telegram_id) {
-    let tgText = '';
-    if (params.type === 'CREATED') {
-      tgText =
-        `✨ *PESANAN LAYANAN KUSTOM DITERIMA*\n\n` +
-        `Halo *${params.order.customer_name}*,\n` +
-        `Permintaan layanan kustom *${params.order.project_title}* telah masuk ke antrian RizzFlow.\n\n` +
-        `🔑 *Kode Pesanan Kamu:* \`${params.order.order_code}\`\n\n` +
-        `Simpan kode di atas! Kami akan mengirimkan update estimasi pengerjaan dan tagihan melalui bot ini. Kamu juga dapat mengeceknya di menu Layanan: ${appUrl}`;
-    } else if (params.type === 'ACCEPTED_ESTIMATE') {
-      tgText =
-        `🛠️ *PESANAN DITERIMA & SEDANG DIPROSES*\n\n` +
-        `Halo *${params.order.customer_name}*,\n` +
-        `Pesanan kustom *${params.order.project_title}* (Kode: \`${params.order.order_code}\`) telah diterima Admin dan sedang dikerjakan!\n\n` +
-        `⏱️ *Estimasi Selesai:* ${params.order.estimated_completion || 'Segera'}\n` +
-        (params.order.price > 0
-          ? `💰 *Estimasi Biaya:* Rp${params.order.price.toLocaleString('id-ID')}\n`
-          : '') +
-        `📝 *Pesan Admin:* ${params.order.admin_note}\n\n` +
-        `Cek status kapan saja di: ${appUrl}`;
-    } else if (params.type === 'BILL_READY') {
-      tgText =
-        `🎉 *PRODUK KUSTOM SELESAI — SILAKAN LAKUKAN PEMBAYARAN*\n\n` +
-        `Halo *${params.order.customer_name}*,\n` +
-        `Pesanan kustom *${params.order.project_title}* (Kode: \`${params.order.order_code}\`) telah *SELESAI* dikerjakan!\n\n` +
-        `💵 *Total Tagihan:* *Rp${params.order.price.toLocaleString('id-ID')}*\n` +
-        `📝 *Catatan Admin:* ${params.order.admin_note}\n\n` +
-        `Silakan buka menu *Layanan* di ${appUrl}, masukkan kode \`${params.order.order_code}\`, dan bayar via QRIS untuk langsung mengunduh produkmu!`;
-    } else {
-      const fileLines = (params.files || [])
-        .map((f, i) => `${i + 1}. ${f.productTitle}:\n${f.signedDownloadUrl}`)
-        .join('\n\n');
-      tgText =
-        `✅ *PEMBAYARAN LUNAS — BERIKUT PRODUK KUSTOM KAMU*\n\n` +
-        `Terima kasih *${params.order.customer_name}*! Pembayaran untuk pesanan \`${params.order.order_code}\` telah lunas.\n\n` +
-        `📦 *Link Unduh Produk Kamu:*\n${fileLines || 'Silakan unduh langsung di halaman Layanan website RizzFlow.'}`;
-    }
-
-    await sendClientTelegramNotification(
-      params.order.customer_telegram_id,
-      tgText
-    );
+  for (let j = 0; j < links.length; j++) {
+    results.push({
+      productTitle:
+        links.length > 1 || files.length > 0
+          ? `${order.project_title} — Link Akses ${j + 1}`
+          : `${order.project_title} (Link Akses Produk)`,
+      quantity: 1,
+      signedDownloadUrl: links[j],
+    });
   }
+
+  return results;
+}
+
+/**
+ * Menyelesaikan pembayaran tagihan kustom menjadi LUNAS,
+ * mencatat pendapatan ke tabel `orders` Admin, mengirim email (jika ada),
+ * dan mengirim notifikasi Telegram ke Admin.
+ */
+async function settleCustomOrderAsPaid(
+  allOrders: CustomProjectOrder[],
+  targetOrder: CustomProjectOrder
+): Promise<{
+  settledOrder: CustomProjectOrder;
+  unlockedFiles: DeliveryLinkItem[];
+}> {
+  const nowIso = new Date().toISOString();
+  const settledOrder: CustomProjectOrder = {
+    ...targetOrder,
+    status: 'LUNAS',
+    payment_status: 'PAID',
+    admin_note:
+      targetOrder.admin_note ||
+      'Pembayaran tagihan kustom telah diterima! Silakan unduh file produk kustom kamu di bawah ini.',
+    updated_at: nowIso,
+  };
+
+  const nextOrders = allOrders.map((o) =>
+    o.id === targetOrder.id ? settledOrder : o
+  );
+  await saveStoredCustomProjectOrders(nextOrders);
+
+  // Catat ke tabel `orders` utama agar masuk Total Pendapatan Lunas di Dashboard Admin
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const invNo =
+      settledOrder.invoice_number ||
+      `KST-${settledOrder.order_code.replace('KST-', '')}-${Date.now()}`;
+
+    const { data: existingOrd } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('invoice_number', invNo)
+      .maybeSingle();
+
+    if (!existingOrd) {
+      await supabaseAdmin.from('orders').insert({
+        invoice_number: invNo,
+        customer_email:
+          settledOrder.customer_email ||
+          `${settledOrder.customer_name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'klien'}@kustom.rizzflow`,
+        subtotal_amount: settledOrder.price,
+        discount_amount: 0,
+        final_amount: settledOrder.price,
+        payment_status: 'PAID',
+        qris_string: settledOrder.qris_string,
+        qris_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+        paid_at: nowIso,
+      });
+    }
+  } catch (e) {
+    console.error('Gagal mencatat pendapatan layanan kustom ke orders:', e);
+  }
+
+  const unlockedFiles = await buildCustomOrderDeliveryItems(settledOrder);
+
+  // Kirim email otomatis jika email klien diisi
+  let emailNote = 'File langsung terbuka di halaman website pelanggan.';
+  if (
+    settledOrder.customer_email &&
+    settledOrder.customer_email.includes('@')
+  ) {
+    try {
+      const emailFiles: PurchasedFileLink[] = unlockedFiles.map((f) => ({
+        productTitle: f.productTitle,
+        quantity: f.quantity,
+        signedDownloadUrl: f.signedDownloadUrl,
+      }));
+      await sendCustomOrderEmail({
+        type: 'PAID_DELIVERY',
+        toEmail: settledOrder.customer_email,
+        customerName: settledOrder.customer_name,
+        orderCode: settledOrder.order_code,
+        projectTitle: settledOrder.project_title,
+        price: settledOrder.price,
+        adminNote: settledOrder.admin_note,
+        files: emailFiles,
+      });
+      emailNote = `✅ File terbuka di web & berhasil dikirim ke email ${settledOrder.customer_email}`;
+    } catch (mailErr) {
+      console.error('Gagal kirim email produk kustom:', mailErr);
+      emailNote =
+        'File terbuka langsung di halaman web (pengiriman salinan email gagal).';
+    }
+  }
+
+  await sendAdminTelegramNotification(
+    `✅ *TAGIHAN LAYANAN KUSTOM LUNAS!*\n\n` +
+      `🔑 Kode: *${settledOrder.order_code}*\n` +
+      `👤 Klien: ${settledOrder.customer_name}\n` +
+      `📌 Proyek: *${settledOrder.project_title}*\n` +
+      `💵 Total Lunas: *Rp${settledOrder.price.toLocaleString('id-ID')}*\n\n` +
+      `📦 *Status Pengiriman:* ${emailNote}`
+  );
+
+  return { settledOrder, unlockedFiles };
 }
 
 export async function GET(request: Request) {
@@ -133,47 +188,51 @@ export async function GET(request: Request) {
       .trim()
       .toUpperCase();
 
+    // 1. Konfigurasi publik untuk halaman toko
     if (isPublicConfig) {
-       const config = await getStoredCustomServiceConfig();
-       return NextResponse.json({
-         customServiceConfig: {
-           title: config.title,
-           description: config.description,
-           services: config.services,
-           admin_whatsapp: config.admin_whatsapp,
-           admin_telegram: config.admin_telegram,
-           report_email: config.report_email,
-         },
-       });
-     }
+      const config = await getStoredCustomServiceConfig();
+      return NextResponse.json({
+        customServiceConfig: {
+          title: config.title,
+          description: config.description,
+          services: config.services,
+          admin_whatsapp: config.admin_whatsapp,
+          admin_telegram: config.admin_telegram,
+          report_email: config.report_email,
+        },
+      });
+    }
 
+    // 2. Pelanggan mengecek Kode Tagihan Layanan Kustom (KST-XXXX)
     if (orderCodeParam) {
       const allCustomOrders = await getStoredCustomProjectOrders();
-      const found = allCustomOrders.find(
+      let found = allCustomOrders.find(
         (o) => o.order_code.toUpperCase() === orderCodeParam
       );
 
       if (!found) {
         return NextResponse.json(
-          {
-            error: `Kode Pesanan Kustom "${orderCodeParam}" tidak ditemukan. Pastikan penulisan kode sudah benar.`,
-          },
+          { error: `Kode Tagihan "${orderCodeParam}" tidak ditemukan.` },
           { status: 404 }
         );
       }
 
-      let unlockedFiles: PurchasedFileLink[] = [];
+      let unlockedFiles: DeliveryLinkItem[] = [];
 
-      if (found.payment_status === 'PAID') {
-        const rawDeliverable = JSON.stringify({
-          files: found.file_paths,
-          links: found.delivery_links,
-        });
-        unlockedFiles = await buildProductDeliveryItems({
-          productTitle: found.project_title,
-          quantity: 1,
-          rawFilePath: rawDeliverable,
-        });
+      // Cek otomatis langsung ke server resmi DOKU jika QRIS sedang menunggu pembayaran
+      if (
+        found.status === 'SIAP_DIBAYAR' &&
+        found.payment_status === 'PENDING' &&
+        found.invoice_number
+      ) {
+        const liveDokuStatus = await checkDokuOrderStatus(found.invoice_number);
+        if (liveDokuStatus === 'SUCCESS') {
+          const settled = await settleCustomOrderAsPaid(allCustomOrders, found);
+          found = settled.settledOrder;
+          unlockedFiles = settled.unlockedFiles;
+        }
+      } else if (found.status === 'LUNAS') {
+        unlockedFiles = await buildCustomOrderDeliveryItems(found);
       }
 
       return NextResponse.json({
@@ -183,21 +242,22 @@ export async function GET(request: Request) {
       });
     }
 
+    // 3. Akses penuh khusus Admin
     const isAdmin = await verifyAdminAuth(request);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     }
 
-    const [messages, customServiceConfig, customOrders] = await Promise.all([
+    const [messages, customOrders, customServiceConfig] = await Promise.all([
       getStoredCustomerMessages(),
-      getStoredCustomServiceConfig(),
       getStoredCustomProjectOrders(),
+      getStoredCustomServiceConfig(),
     ]);
 
     return NextResponse.json({
       messages,
-      customServiceConfig,
       customOrders,
+      customServiceConfig,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Gagal memuat data.';
@@ -210,234 +270,87 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       action?:
         | 'SEND_MESSAGE'
+        | 'ADMIN_CREATE_CUSTOM_BILL'
         | 'GENERATE_CUSTOM_QRIS'
         | 'CONFIRM_CUSTOM_PAYMENT';
       type?: 'KLAIM_GARANSI' | 'LAYANAN_KHUSUS' | 'PERTANYAAN';
-      notify_channel?: CustomNotificationChannel;
       sender_name?: string;
       sender_email?: string;
       sender_contact?: string;
-      customer_telegram_id?: string;
       invoice_number?: string;
-      project_title?: string;
       message?: string;
+      // Field pembuatan tagihan kustom langsung oleh Admin
+      customer_name?: string;
+      customer_email?: string;
+      customer_contact?: string;
+      project_title?: string;
+      price?: number;
+      admin_note?: string;
+      file_paths?: string[];
+      delivery_links?: string[];
+      // Field pembayaran QRIS
       order_code?: string;
     };
 
     const action = body.action || 'SEND_MESSAGE';
 
-    // A. KLIEN MEMBUKA QRIS UNTUK MEMBAYAR TAGIHAN LAYANAN KUSTOM
-    if (action === 'GENERATE_CUSTOM_QRIS') {
-      const code = (body.order_code || '').trim().toUpperCase();
-      const allCustomOrders = await getStoredCustomProjectOrders();
-      const target = allCustomOrders.find((o) => o.order_code === code);
-
-      if (!target) {
-        return NextResponse.json(
-          { error: 'Kode pesanan tidak ditemukan.' },
-          { status: 404 }
-        );
+    // =========================================================================
+    // 1. ADMIN MEMBUAT TAGIHAN KUSTOM BARU (SETELAH DEAL VIA CHAT WA/TELEGRAM)
+    // =========================================================================
+    if (action === 'ADMIN_CREATE_CUSTOM_BILL') {
+      const isAdmin = await verifyAdminAuth(request);
+      if (!isAdmin) {
+        return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
       }
 
-      if (target.status !== 'SIAP_DIBAYAR' || target.price <= 0) {
+      const customerName = (body.customer_name || '').trim();
+      const customerEmail = (body.customer_email || '').trim().toLowerCase();
+      const customerContact = (body.customer_contact || '').trim();
+      const projectTitle = (body.project_title || '').trim();
+      const price = Math.max(1, Math.round(Number(body.price) || 0));
+      const adminNote =
+        (body.admin_note || '').trim() ||
+        'Produk kustom kamu sudah selesai dikerjakan. Silakan selesaikan pembayaran QRIS di bawah ini agar file langsung terbuka untuk diunduh.';
+
+      const filePaths = Array.isArray(body.file_paths)
+        ? body.file_paths.map((f) => f.trim()).filter((f) => f.length > 0)
+        : [];
+      const deliveryLinks = Array.isArray(body.delivery_links)
+        ? body.delivery_links.map((l) => l.trim()).filter((l) => l.length > 0)
+        : [];
+
+      if (!customerName || !projectTitle) {
         return NextResponse.json(
-          { error: 'Tagihan pesanan ini belum siap dibayar.' },
+          { error: 'Nama Klien dan Nama Proyek wajib diisi.' },
           { status: 400 }
         );
       }
 
-      const invoiceNum = `INV-${target.order_code}-${Math.floor(
-        100 + Math.random() * 900
-      )}`;
-      const qrisRes = await createDokuQrisPayment({
-        invoiceNumber: invoiceNum,
-        amount: target.price,
-        customerEmail: target.customer_email || 'telegram-user@rizzflow.store',
-      });
-
-      const updatedOrders = allCustomOrders.map((o) =>
-        o.order_code === code
-          ? {
-              ...o,
-              qris_string: qrisRes.qris_string,
-              invoice_number: invoiceNum,
-              payment_status: 'PENDING' as const,
-              updated_at: new Date().toISOString(),
-            }
-          : o
-      );
-
-      await saveStoredCustomProjectOrders(updatedOrders);
-      const updatedTarget = updatedOrders.find((o) => o.order_code === code)!;
-
-      // Notifikasi Telegram ke Admin bahwa klien sedang membuka QRIS pembayaran kustom
-      await sendAdminTelegramNotification(
-        `🧾 *KLIEN MEMBUKA QRIS TAGIHAN KUSTOM*\n\n` +
-          `🔑 Kode Pesanan: *${updatedTarget.order_code}*\n` +
-          `✨ Proyek: ${updatedTarget.project_title}\n` +
-          `👤 Klien: ${updatedTarget.customer_name}\n` +
-          `💵 Tagihan: *Rp${updatedTarget.price.toLocaleString('id-ID')}*`
-      );
-
-      return NextResponse.json({
-        customOrder: updatedTarget,
-        simulation_mode: process.env.DOKU_SIMULATION_MODE === 'true',
-      });
-    }
-
-    // B. KLIEN MELUNASI TAGIHAN LAYANAN KUSTOM -> KIRIM PRODUK OTOMATIS & NOTIF ADMIN
-    if (action === 'CONFIRM_CUSTOM_PAYMENT') {
-      const code = (body.order_code || '').trim().toUpperCase();
-      const allCustomOrders = await getStoredCustomProjectOrders();
-      const target = allCustomOrders.find((o) => o.order_code === code);
-
-      if (!target) {
+      if (price < 1) {
         return NextResponse.json(
-          { error: 'Kode pesanan tidak ditemukan.' },
-          { status: 404 }
-        );
-      }
-
-      const updatedOrders = allCustomOrders.map((o) =>
-        o.order_code === code
-          ? {
-              ...o,
-              status: 'LUNAS' as const,
-              payment_status: 'PAID' as const,
-              updated_at: new Date().toISOString(),
-            }
-          : o
-      );
-
-      await saveStoredCustomProjectOrders(updatedOrders);
-      const paidTarget = updatedOrders.find((o) => o.order_code === code)!;
-
-      const supabaseAdmin = getSupabaseAdmin();
-      await supabaseAdmin.from('orders').insert({
-        invoice_number:
-          paidTarget.invoice_number ||
-          `INV-${paidTarget.order_code}-${Date.now()}`,
-        customer_email:
-          paidTarget.customer_email ||
-          `telegram-${paidTarget.customer_telegram_id || paidTarget.order_code}`,
-        subtotal_amount: paidTarget.price,
-        discount_amount: 0,
-        final_amount: paidTarget.price,
-        payment_status: 'PAID',
-        qris_string: paidTarget.qris_string,
-        qris_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
-        paid_at: new Date().toISOString(),
-      });
-
-      const rawDeliverable = JSON.stringify({
-        files: paidTarget.file_paths,
-        links: paidTarget.delivery_links,
-      });
-      const unlockedFiles = await buildProductDeliveryItems({
-        productTitle: paidTarget.project_title,
-        quantity: 1,
-        rawFilePath: rawDeliverable,
-      });
-
-      await dispatchClientCustomNotification({
-        order: paidTarget,
-        type: 'PAID_DELIVERY',
-        files: unlockedFiles,
-      });
-
-      await sendAdminTelegramNotification(
-        `💰 *TRANSAKSI LAYANAN KUSTOM BERHASIL LUNAS!*\n\n` +
-          `🔑 Kode Pesanan: *${paidTarget.order_code}*\n` +
-          `✨ Proyek: ${paidTarget.project_title}\n` +
-          `👤 Klien: ${paidTarget.customer_name}\n` +
-          `💵 Nominal Lunas: *Rp${paidTarget.price.toLocaleString('id-ID')}*\n\n` +
-          `File produk kustom telah otomatis dikirim ke klien!`
-      );
-
-      return NextResponse.json({
-        customOrder: paidTarget,
-        unlockedFiles,
-      });
-    }
-
-    // C. KLIEN MENGIRIM PESAN / MEMESAN LAYANAN KUSTOM BARU
-    const senderName = (body.sender_name || '').trim();
-    const senderEmail = (body.sender_email || '').trim().toLowerCase();
-    const senderContact = (body.sender_contact || '').trim();
-    const customerTelegramId = (body.customer_telegram_id || '').trim();
-    const notifyChannel: CustomNotificationChannel =
-      body.notify_channel || 'EMAIL';
-    const invoiceNumber = (body.invoice_number || '').trim();
-    const projectTitle =
-      (body.project_title || '').trim() || 'Pesanan Layanan Digital Kustom';
-    const messageText = (body.message || '').trim();
-    const msgType = body.type || 'LAYANAN_KHUSUS';
-
-    if (!senderName || !messageText) {
-      return NextResponse.json(
-        { error: 'Nama dan rincian pesan wajib diisi.' },
-        { status: 400 }
-      );
-    }
-
-    // Validasi sesuai saluran notifikasi yang dipilih klien
-    if (msgType === 'LAYANAN_KHUSUS') {
-      if (
-        (notifyChannel === 'EMAIL' || notifyChannel === 'BOTH') &&
-        (!senderEmail || !senderEmail.includes('@'))
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              'Mohon isi alamat email aktif kamu untuk menerima kode pesanan via Email.',
-          },
+          { error: 'Harga tagihan minimal Rp1.' },
           { status: 400 }
         );
       }
-      if (
-        (notifyChannel === 'TELEGRAM' || notifyChannel === 'BOTH') &&
-        !customerTelegramId
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              'Mohon isi ID Telegram (Chat ID) kamu untuk menerima notifikasi dari Bot Telegram.',
-          },
-          { status: 400 }
-        );
-      }
-    } else if (!senderEmail || !senderEmail.includes('@')) {
-      return NextResponse.json(
-        { error: 'Alamat email aktif wajib diisi.' },
-        { status: 400 }
-      );
-    }
 
-    const nowIso = new Date().toISOString();
-    let createdCustomOrder: CustomProjectOrder | null = null;
+      const allOrders = await getStoredCustomProjectOrders();
+      const orderCode = generateCustomOrderCode(allOrders);
+      const nowIso = new Date().toISOString();
 
-    if (msgType === 'LAYANAN_KHUSUS') {
-      const existingOrders = await getStoredCustomProjectOrders();
-      const orderCode = generateCustomOrderCode(existingOrders);
-
-      createdCustomOrder = {
+      const newOrder: CustomProjectOrder = {
         id: crypto.randomUUID(),
         order_code: orderCode,
-        customer_name: senderName,
-        customer_email:
-          notifyChannel === 'TELEGRAM' ? '' : senderEmail,
-        customer_contact: senderContact,
-        customer_telegram_id: customerTelegramId,
-        notify_channel: notifyChannel,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_contact: customerContact,
+        notify_channel: 'EMAIL',
         project_title: projectTitle,
-        request_details: messageText,
-        estimated_completion: '',
-        price: 0,
-        admin_note:
-          'Permintaan layanan kustom kamu telah masuk ke antrian dan sedang ditinjau oleh Admin RizzFlow.',
-        file_paths: [],
-        delivery_links: [],
-        status: 'MENUNGGU_PENGERJAAN',
+        request_details: 'Kesepakatan langsung melalui chat dengan Admin.',
+        price,
+        admin_note: adminNote,
+        file_paths: filePaths,
+        delivery_links: deliveryLinks,
+        status: 'SIAP_DIBAYAR',
         payment_status: 'UNPAID',
         qris_string: null,
         invoice_number: null,
@@ -445,15 +358,145 @@ export async function POST(request: Request) {
         updated_at: nowIso,
       };
 
-      await saveStoredCustomProjectOrders([
-        createdCustomOrder,
-        ...existingOrders,
-      ]);
+      const nextOrders = [newOrder, ...allOrders];
+      await saveStoredCustomProjectOrders(nextOrders);
 
-      await dispatchClientCustomNotification({
-        order: createdCustomOrder,
-        type: 'CREATED',
+      // Jika email klien diisi, kirim salinan pemberitahuan tagihan ke emailnya
+      if (customerEmail && customerEmail.includes('@')) {
+        try {
+          await sendCustomOrderEmail({
+            type: 'BILL_READY',
+            toEmail: customerEmail,
+            customerName,
+            orderCode,
+            projectTitle,
+            price,
+            adminNote,
+          });
+        } catch (mailErr) {
+          console.error('Gagal kirim email tagihan kustom:', mailErr);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        customOrder: newOrder,
+        customOrders: nextOrders,
+        message: `Tagihan Kustom ${orderCode} berhasil dibuat! Salin kode atau link tagihannya untuk dikirim ke pelanggan.`,
       });
+    }
+
+    // =========================================================================
+    // 2. PELANGGAN MEMBUAT KODE QRIS UNTUK TAGIHAN KUSTOM (KST-XXXX)
+    // =========================================================================
+    if (action === 'GENERATE_CUSTOM_QRIS') {
+      const code = (body.order_code || '').trim().toUpperCase();
+      const allOrders = await getStoredCustomProjectOrders();
+      const target = allOrders.find((o) => o.order_code.toUpperCase() === code);
+
+      if (!target) {
+        return NextResponse.json(
+          { error: 'Kode tagihan kustom tidak ditemukan.' },
+          { status: 404 }
+        );
+      }
+
+      if (target.status !== 'SIAP_DIBAYAR') {
+        return NextResponse.json(
+          { error: 'Tagihan ini tidak dalam status siap dibayar.' },
+          { status: 400 }
+        );
+      }
+
+      const safeAmount = Math.max(1, Math.round(target.price));
+      const invoiceNumber = `${target.order_code}-${Math.floor(
+        100 + Math.random() * 900
+      )}`;
+
+      const qrisEmail =
+        target.customer_email && target.customer_email.includes('@')
+          ? target.customer_email
+          : 'klien@rizzflow.store';
+
+      const dokuQris = await createDokuQrisPayment({
+        invoiceNumber,
+        amount: safeAmount,
+        customerEmail: qrisEmail,
+      });
+
+      const updatedOrders = allOrders.map((o) =>
+        o.id === target.id
+          ? {
+              ...o,
+              qris_string: dokuQris.qris_string,
+              invoice_number: invoiceNumber,
+              payment_status: 'PENDING' as const,
+              updated_at: new Date().toISOString(),
+            }
+          : o
+      );
+
+      await saveStoredCustomProjectOrders(updatedOrders);
+      const updatedTarget = updatedOrders.find((o) => o.id === target.id)!;
+
+      return NextResponse.json({
+        success: true,
+        customOrder: updatedTarget,
+        simulation_mode: process.env.DOKU_SIMULATION_MODE === 'true',
+      });
+    }
+
+    // =========================================================================
+    // 3. SIMULASI PEMBAYARAN TAGIHAN KUSTOM (KHUSUS MODE SIMULASI)
+    // =========================================================================
+    if (action === 'CONFIRM_CUSTOM_PAYMENT') {
+      const isSimMode = process.env.DOKU_SIMULATION_MODE === 'true';
+      if (!isSimMode) {
+        return NextResponse.json(
+          { error: 'Konfirmasi manual hanya aktif pada mode simulasi.' },
+          { status: 403 }
+        );
+      }
+
+      const code = (body.order_code || '').trim().toUpperCase();
+      const allOrders = await getStoredCustomProjectOrders();
+      const target = allOrders.find((o) => o.order_code.toUpperCase() === code);
+
+      if (!target) {
+        return NextResponse.json(
+          { error: 'Kode tagihan tidak ditemukan.' },
+          { status: 404 }
+        );
+      }
+
+      const { settledOrder, unlockedFiles } = await settleCustomOrderAsPaid(
+        allOrders,
+        target
+      );
+
+      return NextResponse.json({
+        success: true,
+        customOrder: settledOrder,
+        unlockedFiles,
+      });
+    }
+
+    // =========================================================================
+    // 4. FORMULIR KLAIM GARANSI & TANYA ADMIN DARI WEBSITE
+    // =========================================================================
+    const senderName = (body.sender_name || '').trim();
+    const senderEmail = (body.sender_email || '').trim().toLowerCase();
+    const senderContact = (body.sender_contact || '').trim();
+    const invoiceNumber = (body.invoice_number || '').trim();
+    const messageText = (body.message || '').trim();
+    const msgType =
+      body.type === 'KLAIM_GARANSI' ? 'KLAIM_GARANSI' : 'PERTANYAAN';
+
+    if (!senderName || !senderEmail || !messageText) {
+      return NextResponse.json(
+        { error: 'Nama, alamat email, dan isi pesan wajib diisi.' },
+        { status: 400 }
+      );
     }
 
     const existingMessages = await getStoredCustomerMessages();
@@ -461,51 +504,175 @@ export async function POST(request: Request) {
       id: crypto.randomUUID(),
       type: msgType,
       sender_name: senderName,
-      sender_email:
-        senderEmail ||
-        (customerTelegramId ? `Telegram ID: ${customerTelegramId}` : '-'),
+      sender_email: senderEmail,
       sender_contact: senderContact,
-      invoice_number: createdCustomOrder
-        ? createdCustomOrder.order_code
-        : invoiceNumber,
+      invoice_number: invoiceNumber,
       message: messageText,
       status: 'BARU',
-      created_at: nowIso,
+      created_at: new Date().toISOString(),
     };
 
     await saveStoredCustomerMessages([newMsg, ...existingMessages]);
 
-    const typeLabel =
-      msgType === 'LAYANAN_KHUSUS'
-        ? `✨ *PESANAN LAYANAN KUSTOM BARU (${createdCustomOrder?.order_code})*`
-        : msgType === 'KLAIM_GARANSI'
-        ? `🛡️ *KLAIM GARANSI BARU*`
-        : `💬 *PERTANYAAN KLIEN BARU*`;
+    const label =
+      msgType === 'KLAIM_GARANSI' ? '🛡️ KLAIM GARANSI' : '💬 PERTANYAAN KLIEN';
 
     await sendAdminTelegramNotification(
-      `${typeLabel}\n\n` +
+      `${label}\n\n` +
         `👤 Nama: *${senderName}*\n` +
-        `🔔 Saluran Notif: *${notifyChannel}*\n` +
-        `📧 Email: ${senderEmail || '-'}\n` +
-        `🤖 ID Telegram: ${customerTelegramId || '-'}\n` +
-        `📱 WA: ${senderContact || '-'}\n` +
-        (createdCustomOrder
-          ? `🔑 Kode Pesanan: *${createdCustomOrder.order_code}*\n🎯 Layanan: ${projectTitle}\n`
-          : invoiceNumber
-          ? `🧾 Invoice: #${invoiceNumber}\n`
-          : '') +
-        `\n📝 *Rincian Pesan:*\n${messageText}`
+        `📧 Email: ${senderEmail}\n` +
+        `📱 WA/Kontak: ${senderContact || '-'}\n` +
+        (invoiceNumber ? `🧾 Invoice: ${invoiceNumber}\n` : '') +
+        `\n📝 *Pesan:*\n${messageText}`
     );
 
     return NextResponse.json({
       success: true,
-      customOrder: createdCustomOrder,
-      message: createdCustomOrder
-        ? `Pesanan Layanan Kustom berhasil dibuat dengan kode ${createdCustomOrder.order_code}! Notifikasi kode pesanan telah dikirim sesuai pilihanmu.`
-        : 'Pesan kamu berhasil dikirim ke Admin RizzFlow!',
+      message:
+        msgType === 'KLAIM_GARANSI'
+          ? 'Klaim garansi kamu sudah terkirim ke Admin! Kami akan segera mengecek dan membalasnya.'
+          : 'Pertanyaan kamu berhasil dikirim ke Admin! Kami akan segera membalas via email/kontakmu.',
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Gagal mengirim pesan.';
+    const msg =
+      err instanceof Error ? err.message : 'Gagal memproses permintaan.';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const isAdmin = await verifyAdminAuth(request);
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
+    }
+
+    const body = (await request.json()) as {
+      target?: 'CUSTOM_ORDER' | 'MESSAGE';
+      id?: string;
+      // Update Tagihan Kustom
+      customer_name?: string;
+      customer_email?: string;
+      project_title?: string;
+      price?: number;
+      admin_note?: string;
+      file_paths?: string[];
+      delivery_links?: string[];
+      status?: CustomOrderStatus;
+      // Update Pesan
+      message_status?: 'BARU' | 'SELESAI';
+    };
+
+    if (body.target === 'CUSTOM_ORDER') {
+      const allOrders = await getStoredCustomProjectOrders();
+      const target = allOrders.find((o) => o.id === body.id);
+
+      if (!target) {
+        return NextResponse.json(
+          { error: 'Data tagihan kustom tidak ditemukan.' },
+          { status: 404 }
+        );
+      }
+
+      // Jika Admin secara manual menandai tagihan sebagai LUNAS
+      if (body.status === 'LUNAS' && target.status !== 'LUNAS') {
+        const preUpdated: CustomProjectOrder = {
+          ...target,
+          price:
+            body.price !== undefined
+              ? Math.max(1, Math.round(Number(body.price) || 1))
+              : target.price,
+          admin_note:
+            body.admin_note !== undefined
+              ? body.admin_note.trim()
+              : target.admin_note,
+          file_paths: Array.isArray(body.file_paths)
+            ? body.file_paths.filter((f) => f.trim().length > 0)
+            : target.file_paths,
+          delivery_links: Array.isArray(body.delivery_links)
+            ? body.delivery_links.filter((l) => l.trim().length > 0)
+            : target.delivery_links,
+        };
+        await settleCustomOrderAsPaid(allOrders, preUpdated);
+        const freshOrders = await getStoredCustomProjectOrders();
+        return NextResponse.json({
+          success: true,
+          customOrders: freshOrders,
+          message: `Tagihan ${target.order_code} berhasil ditandai LUNAS dan file produk telah dibuka untuk klien!`,
+        });
+      }
+
+      const updatedOrders = allOrders.map((o) =>
+        o.id === target.id
+          ? {
+              ...o,
+              customer_name:
+                body.customer_name !== undefined
+                  ? body.customer_name.trim() || o.customer_name
+                  : o.customer_name,
+              customer_email:
+                body.customer_email !== undefined
+                  ? body.customer_email.trim().toLowerCase()
+                  : o.customer_email,
+              project_title:
+                body.project_title !== undefined
+                  ? body.project_title.trim() || o.project_title
+                  : o.project_title,
+              price:
+                body.price !== undefined
+                  ? Math.max(1, Math.round(Number(body.price) || 1))
+                  : o.price,
+              admin_note:
+                body.admin_note !== undefined
+                  ? body.admin_note.trim()
+                  : o.admin_note,
+              file_paths: Array.isArray(body.file_paths)
+                ? body.file_paths.filter((f) => f.trim().length > 0)
+                : o.file_paths,
+              delivery_links: Array.isArray(body.delivery_links)
+                ? body.delivery_links.filter((l) => l.trim().length > 0)
+                : o.delivery_links,
+              status: body.status || o.status,
+              // Reset QRIS jika harga diubah agar pelanggan mendapat nominal QRIS terbaru
+              qris_string:
+                body.price !== undefined && body.price !== o.price
+                  ? null
+                  : o.qris_string,
+              payment_status:
+                body.price !== undefined &&
+                body.price !== o.price &&
+                o.payment_status !== 'PAID'
+                  ? ('UNPAID' as const)
+                  : o.payment_status,
+              updated_at: new Date().toISOString(),
+            }
+          : o
+      );
+
+      await saveStoredCustomProjectOrders(updatedOrders);
+      return NextResponse.json({
+        success: true,
+        customOrders: updatedOrders,
+        message: `Tagihan kustom ${target.order_code} berhasil diperbarui!`,
+      });
+    }
+
+    // Update Status Pesan Klaim Garansi / Pertanyaan
+    const messages = await getStoredCustomerMessages();
+    const updatedMessages = messages.map((m) =>
+      m.id === body.id
+        ? { ...m, status: body.message_status || 'SELESAI' }
+        : m
+    );
+    await saveStoredCustomerMessages(updatedMessages);
+
+    return NextResponse.json({
+      success: true,
+      messages: updatedMessages,
+      message: 'Status pesan diperbarui.',
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Gagal memperbarui data.';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -551,7 +718,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({
         success: true,
         customServiceConfig: newConfig,
-        message: `Pengaturan disimpan & Email Tes BERHASIL dikirim dari ${testRes.senderEmail} ke ${testRes.recipientEmail}! Silakan cek kotak masuk emailmu.`,
+        message: `Pengaturan disimpan & Email Tes BERHASIL dikirim dari ${testRes.senderEmail} ke ${testRes.recipientEmail}!`,
       });
     }
 
@@ -575,121 +742,6 @@ export async function PUT(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
-  try {
-    const isAdmin = await verifyAdminAuth(request);
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
-    }
-
-    const body = (await request.json()) as {
-      target_type?: 'MESSAGE' | 'CUSTOM_ORDER';
-      step_action?: 'ACCEPT_ESTIMATE' | 'SEND_BILL' | 'COMPLETE_CLOSE';
-      id?: string;
-      status?: string;
-      estimated_completion?: string;
-      price?: number;
-      admin_note?: string;
-      file_paths?: string[];
-      delivery_links?: string[];
-    };
-
-    if (body.target_type === 'CUSTOM_ORDER') {
-      const allOrders = await getStoredCustomProjectOrders();
-      const target = allOrders.find((o) => o.id === body.id);
-      if (!target) {
-        return NextResponse.json(
-          { error: 'Data pesanan kustom tidak ditemukan.' },
-          { status: 404 }
-        );
-      }
-
-      const nextStatus =
-        (body.status as CustomProjectOrder['status']) || target.status;
-      const nextEstimate =
-        body.estimated_completion !== undefined
-          ? body.estimated_completion.trim()
-          : target.estimated_completion || '';
-      const nextPrice =
-        typeof body.price === 'number' ? Math.max(0, body.price) : target.price;
-      const nextNote =
-        body.admin_note !== undefined
-          ? body.admin_note.trim()
-          : target.admin_note;
-      const nextFiles = Array.isArray(body.file_paths)
-        ? body.file_paths
-        : target.file_paths;
-      const nextLinks = Array.isArray(body.delivery_links)
-        ? body.delivery_links
-        : target.delivery_links;
-
-      const updatedOrderItem: CustomProjectOrder = {
-        ...target,
-        status: nextStatus,
-        estimated_completion: nextEstimate,
-        price: nextPrice,
-        admin_note: nextNote,
-        file_paths: nextFiles,
-        delivery_links: nextLinks,
-        updated_at: new Date().toISOString(),
-      };
-
-      const updatedOrders = allOrders.map((o) =>
-        o.id === body.id ? updatedOrderItem : o
-      );
-
-      await saveStoredCustomProjectOrders(updatedOrders);
-
-      // Kirim pemberitahuan ke Klien sesuai tahapan alur Admin
-      if (body.step_action === 'ACCEPT_ESTIMATE' || nextStatus === 'DIPROSES') {
-        await dispatchClientCustomNotification({
-          order: updatedOrderItem,
-          type: 'ACCEPTED_ESTIMATE',
-        });
-      } else if (
-        body.step_action === 'SEND_BILL' ||
-        nextStatus === 'SIAP_DIBAYAR'
-      ) {
-        await dispatchClientCustomNotification({
-          order: updatedOrderItem,
-          type: 'BILL_READY',
-        });
-      }
-
-      return NextResponse.json({
-        success: true,
-        customOrders: updatedOrders,
-        message:
-          body.step_action === 'ACCEPT_ESTIMATE'
-            ? `Pesanan ${target.order_code} diterima & info estimasi pengerjaan telah dikirim ke klien!`
-            : body.step_action === 'SEND_BILL'
-            ? `Produk ${target.order_code} siap & pemberitahuan tagihan telah dikirim ke klien!`
-            : `Status pesanan ${target.order_code} berhasil diperbarui!`,
-      });
-    }
-
-    const messages = await getStoredCustomerMessages();
-    const updated = messages.map((m) =>
-      m.id === body.id
-        ? {
-            ...m,
-            status: (body.status === 'SELESAI' ? 'SELESAI' : 'BARU') as
-              | 'BARU'
-              | 'SELESAI',
-          }
-        : m
-    );
-
-    await saveStoredCustomerMessages(updated);
-    return NextResponse.json({ success: true, messages: updated });
-  } catch {
-    return NextResponse.json(
-      { error: 'Gagal memperbarui status.' },
-      { status: 500 }
-    );
-  }
-}
-
 export async function DELETE(request: Request) {
   try {
     const isAdmin = await verifyAdminAuth(request);
@@ -701,9 +753,9 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id');
     const type = searchParams.get('type');
 
-    if (type === 'CUSTOM_ORDER') {
-      const orders = await getStoredCustomProjectOrders();
-      const updated = orders.filter((o) => o.id !== id);
+    if (type === 'custom_order') {
+      const allOrders = await getStoredCustomProjectOrders();
+      const updated = allOrders.filter((o) => o.id !== id);
       await saveStoredCustomProjectOrders(updated);
       return NextResponse.json({ success: true, customOrders: updated });
     }
@@ -711,7 +763,6 @@ export async function DELETE(request: Request) {
     const messages = await getStoredCustomerMessages();
     const updated = messages.filter((m) => m.id !== id);
     await saveStoredCustomerMessages(updated);
-
     return NextResponse.json({ success: true, messages: updated });
   } catch {
     return NextResponse.json(

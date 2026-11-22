@@ -3,11 +3,18 @@ import crypto from 'crypto';
 import {
   getSupabaseAdmin,
   buildProductDeliveryItems,
+  generateProductSignedUrl,
   sendAdminTelegramNotification,
   getOrderItemsBackup,
+  getStoredCustomProjectOrders,
+  saveStoredCustomProjectOrders,
 } from '@/lib/supabase';
 import { checkDokuOrderStatus } from '@/lib/doku';
-import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
+import {
+  sendProductDeliveryEmail,
+  sendCustomOrderEmail,
+  PurchasedFileLink,
+} from '@/lib/email';
 import { Order, OrderItem, Product } from '@/types';
 
 interface ParsedWebhookInfo {
@@ -92,12 +99,6 @@ function checkSnapWebhookSignature(params: {
   );
 }
 
-/**
- * Mengekstrak nomor invoice dan status dari 3 kemungkinan format notifikasi DOKU:
- * 1. JSON Checkout Non-SNAP
- * 2. JSON Direct API SNAP QRIS
- * 3. Form-Encoded / URL Query Params (Notify QRIS DOKU)
- */
 function parseIncomingDokuWebhook(
   requestUrl: string,
   rawBody: string,
@@ -105,7 +106,6 @@ function parseIncomingDokuWebhook(
 ): ParsedWebhookInfo | null {
   const trimmed = rawBody.trim();
 
-  // 1. Coba baca sebagai JSON (Checkout atau SNAP)
   if (trimmed.startsWith('{')) {
     try {
       const json = JSON.parse(trimmed) as {
@@ -156,11 +156,10 @@ function parseIncomingDokuWebhook(
         };
       }
     } catch {
-      // Lanjutkan ke pengecekan form/query di bawah
+      // Lanjut ke form/query
     }
   }
 
-  // 2. Coba baca sebagai Form-Encoded Body atau URL Query Params (Legacy Direct QRIS Notify)
   const urlObj = new URL(requestUrl);
   const queryParams = urlObj.searchParams;
   const formParams = new URLSearchParams(trimmed);
@@ -258,7 +257,6 @@ export async function POST(request: Request) {
     if (isSimulationBypass) {
       isVerifiedPayment = isSuccessPayload;
     } else {
-      // Tahap 1: Cek Signature Kriptografi (Non-SNAP atau SNAP)
       const nonSnapValid =
         Boolean(configuredClientId) &&
         clientId === configuredClientId &&
@@ -272,7 +270,9 @@ export async function POST(request: Request) {
 
       const snapValid =
         hasSnapHeaders &&
-        (!xPartnerId || !configuredClientId || xPartnerId === configuredClientId) &&
+        (!xPartnerId ||
+          !configuredClientId ||
+          xPartnerId === configuredClientId) &&
         checkSnapWebhookSignature({
           xSignature,
           xTimestamp,
@@ -283,8 +283,6 @@ export async function POST(request: Request) {
       if ((nonSnapValid || snapValid) && isSuccessPayload) {
         isVerifiedPayment = true;
       } else {
-        // Tahap 2 (Keamanan Anti-Gagal): Jika formatnya Legacy QRIS Notify atau header berbeda,
-        // tanyakan langsung ke server resmi DOKU (Server-to-Server) agar 100% asli & aman!
         const liveStatusFromDoku = await checkDokuOrderStatus(invoiceNumber);
         if (liveStatusFromDoku === 'SUCCESS') {
           isVerifiedPayment = true;
@@ -304,6 +302,120 @@ export async function POST(request: Request) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
+
+    // =========================================================================
+    // KASUS A: PEMBAYARAN TAGIHAN LAYANAN KUSTOM (INVOICE DIAWALI "KST-")
+    // =========================================================================
+    if (invoiceNumber.toUpperCase().startsWith('KST-')) {
+      const allCustomOrders = await getStoredCustomProjectOrders();
+      const targetCustom = allCustomOrders.find(
+        (o) =>
+          o.invoice_number === invoiceNumber ||
+          invoiceNumber.startsWith(`${o.order_code}-`)
+      );
+
+      if (targetCustom) {
+        if (targetCustom.status === 'LUNAS') {
+          return buildSuccessAckResponse(format, invoiceNumber, 'ALREADY_PAID');
+        }
+
+        const nowIso = new Date().toISOString();
+        const settledCustom = {
+          ...targetCustom,
+          status: 'LUNAS' as const,
+          payment_status: 'PAID' as const,
+          updated_at: nowIso,
+        };
+
+        const nextCustomOrders = allCustomOrders.map((o) =>
+          o.id === targetCustom.id ? settledCustom : o
+        );
+        await saveStoredCustomProjectOrders(nextCustomOrders);
+
+        const { data: existingOrd } = await supabaseAdmin
+          .from('orders')
+          .select('id')
+          .eq('invoice_number', invoiceNumber)
+          .maybeSingle();
+
+        if (!existingOrd) {
+          await supabaseAdmin.from('orders').insert({
+            invoice_number: invoiceNumber,
+            customer_email:
+              settledCustom.customer_email ||
+              `${settledCustom.customer_name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'klien'}@kustom.rizzflow`,
+            subtotal_amount: settledCustom.price,
+            discount_amount: 0,
+            final_amount: settledCustom.price,
+            payment_status: 'PAID',
+            qris_string: settledCustom.qris_string,
+            qris_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+            paid_at: nowIso,
+          });
+        }
+
+        const deliveryFiles: PurchasedFileLink[] = [];
+        for (let i = 0; i < (settledCustom.file_paths || []).length; i++) {
+          try {
+            const url = await generateProductSignedUrl(
+              settledCustom.file_paths[i]
+            );
+            deliveryFiles.push({
+              productTitle: `${settledCustom.project_title} — File ${i + 1}`,
+              quantity: 1,
+              signedDownloadUrl: url,
+            });
+          } catch (e) {
+            console.error('Gagal signed url file kustom di webhook:', e);
+          }
+        }
+        for (let j = 0; j < (settledCustom.delivery_links || []).length; j++) {
+          deliveryFiles.push({
+            productTitle: `${settledCustom.project_title} — Link Akses ${j + 1}`,
+            quantity: 1,
+            signedDownloadUrl: settledCustom.delivery_links[j],
+          });
+        }
+
+        if (
+          settledCustom.customer_email &&
+          settledCustom.customer_email.includes('@')
+        ) {
+          try {
+            await sendCustomOrderEmail({
+              type: 'PAID_DELIVERY',
+              toEmail: settledCustom.customer_email,
+              customerName: settledCustom.customer_name,
+              orderCode: settledCustom.order_code,
+              projectTitle: settledCustom.project_title,
+              price: settledCustom.price,
+              adminNote: settledCustom.admin_note,
+              files: deliveryFiles,
+            });
+          } catch (e) {
+            console.error('Gagal kirim email produk kustom via webhook:', e);
+          }
+        }
+
+        await sendAdminTelegramNotification(
+          `✅ *TAGIHAN LAYANAN KUSTOM LUNAS OTOMATIS!*\n\n` +
+            `🔑 Kode: *${settledCustom.order_code}*\n` +
+            `👤 Klien: ${settledCustom.customer_name}\n` +
+            `📌 Proyek: *${settledCustom.project_title}*\n` +
+            `💵 Total Lunas: *Rp${settledCustom.price.toLocaleString('id-ID')}*`
+        );
+
+        return buildSuccessAckResponse(
+          format,
+          invoiceNumber,
+          'CUSTOM_PAID_AND_DELIVERED'
+        );
+      }
+    }
+
+    // =========================================================================
+    // KASUS B: PEMBAYARAN PRODUK DIGITAL KATALOG (INVOICE "INV-...")
+    // =========================================================================
     const { data: orderData, error: orderErr } = await supabaseAdmin
       .from('orders')
       .select('*, order_items(*)')

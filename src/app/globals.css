@@ -47,3 +47,27 @@ body {
 .rf-bottom-bar-shadow {
   box-shadow: 0 12px 36px -4px rgba(15, 42, 29, 0.16), 0 4px 12px -2px rgba(15, 42, 29, 0.08);
 }
+
+/* Efek animasi tekan (tactile press) global untuk semua tombol di website */
+button,
+a[class*="rounded-full"],
+a[class*="rounded-2xl"],
+a[class*="rounded-xl"] {
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+button:not(:disabled):active,
+a[class*="rounded-full"]:active,
+a[class*="rounded-2xl"]:active,
+a[class*="rounded-xl"]:active {
+  transform: scale(0.95);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}

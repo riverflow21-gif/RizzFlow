@@ -137,6 +137,18 @@ export default function StorefrontClient({
 
   const isAnyOverlayOpen = Boolean(activeProduct || isCartOpen);
 
+  // Otomatis buka tab Layanan jika link membawa ?tab=services atau ?kode=KST-...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (
+      params.get('tab') === 'services' ||
+      params.get('kode') ||
+      params.get('code')
+    ) {
+      setActiveTab('services');
+    }
+  }, []);
+
   useEffect(() => {
     if (isAnyOverlayOpen) {
       document.body.style.overflow = 'hidden';
