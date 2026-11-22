@@ -13,7 +13,6 @@ import {
   Zap,
   QrCode,
   ShieldCheck,
-  KeyRound,
 } from 'lucide-react';
 import { Category, Product, StoreSettings } from '@/types';
 import {
@@ -81,7 +80,7 @@ export default function HomeTabView({
         <div className="w-52 h-52 rounded-full bg-[#6B9071]/20 blur-2xl absolute bottom-0 -left-16 pointer-events-none" />
 
         <div className="max-w-5xl mx-auto space-y-5 relative z-10">
-          {/* Baris Identitas Toko & Pintasan Cek Pesanan Kustom */}
+          {/* Baris Identitas Toko (Bersih tanpa tombol Cek Pesanan Kustom) */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
@@ -99,15 +98,9 @@ export default function HomeTabView({
               </div>
             </div>
 
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.94 }}
-              onClick={() => onNavigateTab('services')}
-              className="px-3.5 py-2 rounded-full bg-[#375534]/85 hover:bg-[#375534] text-[#E3EED4] border border-[#6B9071]/40 text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors shrink-0"
-            >
-              <KeyRound className="w-3.5 h-3.5 text-[#E3EED4]" />
-              <span>Cek Pesanan Kustom</span>
-            </motion.button>
+            <span className="px-3 py-1.5 rounded-full bg-[#375534]/75 text-[#E3EED4] border border-[#6B9071]/40 text-[11px] font-extrabold shrink-0">
+              ⚡ Instan 24/7
+            </span>
           </div>
 
           {/* Kolom Pencarian Kapsul */}
@@ -164,17 +157,14 @@ export default function HomeTabView({
                   onClick={() => onNavigateTab('services')}
                   className="px-4 py-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white border border-[#E3EED4]/30 font-bold text-xs sm:text-sm transition-colors"
                 >
-                  Layanan Kustom &amp; Garansi
+                  Jasa Kustom &amp; Garansi
                 </motion.button>
               </div>
             </div>
           </div>
 
-          {/* ================================================================ */}
-          {/* 3 GELEMBUNG KEUNGGULAN DENGAN ANIMASI TEKS BERJALAN (MARQUEE) */}
-          {/* ================================================================ */}
+          {/* 3 GELEMBUNG KEUNGGULAN DENGAN ANIMASI TEKS BERJALAN */}
           <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-1">
-            {/* Gelembung 1: Akses Instan */}
             <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <Zap className="w-3.5 h-3.5" />
@@ -219,7 +209,6 @@ export default function HomeTabView({
               </div>
             </div>
 
-            {/* Gelembung 2: QRIS Resmi */}
             <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <QrCode className="w-3.5 h-3.5" />
@@ -264,7 +253,6 @@ export default function HomeTabView({
               </div>
             </div>
 
-            {/* Gelembung 3: Garansi 100% */}
             <div className="px-2.5 py-2.5 rounded-2xl bg-[#375534]/45 border border-[#6B9071]/35 flex items-center gap-2 overflow-hidden">
               <div className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-3.5 h-3.5" />
@@ -313,7 +301,7 @@ export default function HomeTabView({
       </section>
 
       {/* ==================================================================== */}
-      {/* KONTEN UTAMA BERANDA (LATAR ALABASTER LEMBUT #F6F8F3) */}
+      {/* KONTEN UTAMA BERANDA */}
       {/* ==================================================================== */}
       <div className="max-w-5xl mx-auto px-4 space-y-8">
         {categories.length > 0 && (
@@ -467,11 +455,12 @@ export default function HomeTabView({
           )}
         </section>
 
+        {/* Banner Jasa Kustom (Bersih tanpa tulisan Cek Kode) */}
         <section className="rounded-[28px] bg-[#E3EED4] border border-[#AEC3B0] p-5 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="space-y-2 max-w-xl">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#375534] text-[11px] font-extrabold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Layanan Kustom &amp; Cek Kode Pesanan</span>
+              <span>Layanan Jasa Kustom</span>
             </span>
             <h3 className="text-base sm:text-xl font-extrabold text-[#0F2A1D]">
               {customService.title}
@@ -497,7 +486,7 @@ export default function HomeTabView({
             onClick={() => onNavigateTab('services')}
             className="self-start md:self-center pl-5 pr-2.5 py-2.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white font-bold text-xs sm:text-sm inline-flex items-center gap-3 shrink-0 transition-colors"
           >
-            <span>Pesan / Cek Kode Kustom</span>
+            <span>Pesan Jasa Kustom</span>
             <span className="w-7 h-7 rounded-full bg-[#E3EED4] text-[#0F2A1D] flex items-center justify-center">
               <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
             </span>

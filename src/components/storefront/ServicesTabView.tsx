@@ -51,7 +51,7 @@ type NullableString = string | null;
 const SERVICE_FAQ_ITEMS = [
   {
     q: 'Bagaimana alur pemesanan dan pembayaran Layanan Kustom?',
-    a: 'Pilih jenis layanan yang kamu butuhkan lalu klik tombol Chat WhatsApp atau Telegram untuk berdiskusi langsung mengenai detail dan harga dengan Admin. Setelah selesai dikerjakan, Admin akan memberikan Kode Tagihan (KST-XXXX) dan link pembayaran QRIS. Begitu dibayar, file produkmu langsung terbuka otomatis di halaman ini.',
+    a: 'Pilih jenis layanan yang kamu butuhkan lalu klik tombol Diskusi via WhatsApp atau Telegram untuk membahas detail dan harga langsung bersama Admin. Setelah selesai dikerjakan, Admin akan mengirim link pembayaran QRIS resmi ke chat kamu. Begitu dibayar, file produkmu langsung terbuka otomatis untuk diunduh.',
   },
   {
     q: 'Bagaimana cara menerima file produk digital instan setelah bayar QRIS?',
@@ -76,7 +76,8 @@ export default function ServicesTabView({
   const qrisBoxRef = useRef(null as HTMLDivElement | null);
   const isPollingRef = useRef(false);
 
-  // State Pelacakan & Pembayaran Tagihan Kustom (KST-XXXX)
+  // Area Pembayaran Transaksi Kustom (Tersembunyi secara default, terbuka otomatis lewat link Admin)
+  const [showManualBillInput, setShowManualBillInput] = useState(false);
   const [orderCodeInput, setOrderCodeInput] = useState('');
   const [checkedOrder, setCheckedOrder] = useState(
     null as NullableCustomOrder
@@ -92,7 +93,7 @@ export default function ServicesTabView({
   const [isSimMode, setIsSimMode] = useState(false);
   const [checkError, setCheckError] = useState(null as NullableString);
 
-  // State Pilihan Layanan Kustom (Untuk Chat Langsung WA / Telegram)
+  // State Pilihan Layanan Kustom (Diskusi Langsung WA / Telegram)
   const [selectedServiceName, setSelectedServiceName] = useState(
     customService.services[0] || 'Layanan Pembuatan Digital Kustom'
   );
@@ -111,7 +112,6 @@ export default function ServicesTabView({
   const [feedback, setFeedback] = useState(null as NullableFeedback);
   const [openFaqIndex, setOpenFaqIndex] = useState(0 as NullableNumber);
 
-  // Helper membangun link WhatsApp dengan teks kustom
   const buildDynamicWaUrl = (customText: string): NullableString => {
     const rawWa = customService.admin_whatsapp || '';
     const digits = rawWa.replace(/[^0-9]/g, '');
@@ -124,7 +124,6 @@ export default function ServicesTabView({
     return whatsappUrl;
   };
 
-  // Helper membangun link Telegram dengan teks pre-fill
   const buildDynamicTgUrl = (customText: string): NullableString => {
     if (!telegramUrl) return null;
     const base = telegramUrl.split('?')[0];
@@ -167,7 +166,7 @@ export default function ServicesTabView({
             setCheckedOrder(null);
             setUnlockedFiles([]);
             throw new Error(
-              data.error || `Kode Tagihan "${normalizedCode}" tidak ditemukan.`
+              data.error || `Kode Transaksi "${normalizedCode}" tidak ditemukan.`
             );
           }
           return null;
@@ -199,7 +198,7 @@ export default function ServicesTabView({
       } catch (err) {
         if (!silent) {
           setCheckError(
-            err instanceof Error ? err.message : 'Gagal memeriksa kode tagihan.'
+            err instanceof Error ? err.message : 'Gagal memeriksa transaksi.'
           );
         }
         return null;
@@ -214,7 +213,7 @@ export default function ServicesTabView({
     []
   );
 
-  // Otomatis baca ?kode=KST-XXXX saat pelanggan membuka link tagihan dari WA/Telegram
+  // Otomatis membuka tagihan jika pelanggan datang dari link WA/Telegram (?kode=KST-XXXX)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const codeFromUrl = (params.get('kode') || params.get('code') || '').trim();
@@ -390,7 +389,7 @@ export default function ServicesTabView({
 
           ctx.fillStyle = '#E3EED4';
           ctx.font = 'bold 17px sans-serif';
-          ctx.fillText(`Kode Tagihan: ${checkedOrder.order_code}`, width / 2, 84);
+          ctx.fillText(`Kode Transaksi: ${checkedOrder.order_code}`, width / 2, 84);
 
           const qrSize = 430;
           const qrX = (width - qrSize) / 2;
@@ -502,81 +501,15 @@ export default function ServicesTabView({
   const supportTgLink = buildDynamicTgUrl(supportChatText);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 pt-5 pb-12 space-y-8">
+    <div className="max-w-5xl mx-auto px-4 pt-5 pb-12 space-y-7">
       {/* ==================================================================== */}
-      {/* 1. KOLOM CEK KODE TAGIHAN & AMBIL FILE LAYANAN KUSTOM (KST-XXXX) */}
-      {/* ==================================================================== */}
-      <section className="rounded-[32px] bg-[#0F2A1D] text-[#E3EED4] p-6 sm:p-8 border border-[#375534] shadow-lg relative overflow-hidden space-y-5">
-        <div className="w-60 h-60 rounded-full bg-[#375534]/40 blur-3xl absolute -top-20 -right-12 pointer-events-none" />
-
-        <div className="relative z-10 space-y-4">
-          <div className="space-y-1.5">
-            <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#375534] text-[#E3EED4] text-xs font-extrabold">
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>Pembayaran Tagihan &amp; Ambil File Kustom</span>
-            </span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Bayar Tagihan &amp; Unduh Produk Kustom
-            </h1>
-            <p className="text-xs sm:text-sm text-[#AEC3B0] max-w-2xl leading-relaxed">
-              Sudah deal harga dengan Admin lewat chat? Masukkan{' '}
-              <strong>Kode Tagihan (Contoh: KST-4829)</strong> dari Admin di
-              bawah ini untuk membayar via QRIS resmi dan langsung mengunduh
-              file hasil pengerjaanmu.
-            </p>
-          </div>
-
-          <form
-            onSubmit={handleCheckFormSubmit}
-            className="flex flex-col sm:flex-row gap-3"
-          >
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-[#AEC3B0] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={orderCodeInput}
-                onChange={(e) =>
-                  setOrderCodeInput(e.target.value.toUpperCase())
-                }
-                placeholder="Ketik Kode Tagihan dari Admin (Contoh: KST-4829)"
-                className="w-full pl-11 pr-4 py-3.5 rounded-full bg-[#375534]/65 border border-[#6B9071]/50 text-sm sm:text-base font-extrabold tracking-wider uppercase text-white placeholder:text-xs placeholder:font-normal placeholder:tracking-normal placeholder:text-[#AEC3B0] focus:outline-none focus:border-[#E3EED4]"
-              />
-            </div>
-
-            <motion.button
-              type="submit"
-              whileTap={{ scale: 0.95 }}
-              disabled={isCheckingCode || !orderCodeInput.trim()}
-              className="px-7 py-3.5 rounded-full bg-[#E3EED4] hover:bg-white text-[#0F2A1D] font-extrabold text-xs sm:text-sm transition-all shrink-0 shadow-sm inline-flex items-center justify-center gap-2"
-            >
-              {isCheckingCode ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Mencari Tagihan...</span>
-                </>
-              ) : (
-                <span>Buka Tagihan</span>
-              )}
-            </motion.button>
-          </form>
-
-          {checkError && (
-            <div className="p-3.5 rounded-2xl bg-red-950/80 border border-red-400/40 text-red-200 text-xs font-bold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-300" />
-              <span>{checkError}</span>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ==================================================================== */}
-      {/* HASIL TAGIHAN KUSTOM (QRIS + SIMPAN PNG + VERIFIKASI OTOMATIS & CEPAT) */}
+      {/* KARTU TRANSAKSI KUSTOM (OTOMATIS MUNCUL SAAT KLIK LINK DARI ADMIN) */}
       {/* ==================================================================== */}
       {checkedOrder && (
         <motion.section
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="rounded-[28px] bg-white border-2 border-[#6B9071] p-6 sm:p-7 rf-card-shadow space-y-5"
+          className="rounded-[28px] bg-white border-2 border-[#0F2A1D] p-6 sm:p-7 rf-card-shadow space-y-5"
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#AEC3B0]/40 pb-4">
             <div>
@@ -803,106 +736,169 @@ export default function ServicesTabView({
       )}
 
       {/* ==================================================================== */}
-      {/* 2. PESAN LAYANAN KUSTOM (DISKUSI LANGSUNG VIA WA / TELEGRAM) */}
+      {/* 1. PESAN LAYANAN KUSTOM (LANGSUNG DI ATAS — DISKUSI VIA CHAT) */}
       {/* ==================================================================== */}
-      <section className="rounded-[28px] bg-[#E3EED4] border border-[#AEC3B0] p-6 sm:p-7 space-y-5">
-        <div className="space-y-1.5 max-w-2xl">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#375534] text-xs font-extrabold">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Pesan Jasa Kustom — Diskusi Langsung</span>
-          </span>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-[#0F2A1D]">
-            {customService.title}
-          </h2>
-          <p className="text-xs sm:text-sm text-[#375534] leading-relaxed">
-            {customService.description}
-          </p>
-        </div>
+      <section className="rounded-[32px] bg-[#0F2A1D] text-[#E3EED4] p-6 sm:p-8 border border-[#375534] shadow-lg relative overflow-hidden space-y-5">
+        <div className="w-60 h-60 rounded-full bg-[#375534]/40 blur-3xl absolute -top-20 -right-12 pointer-events-none" />
 
-        <div className="space-y-3">
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#375534]">
-            1. Pilih jenis layanan yang ingin dibuat:
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {customService.services.map((srv, idx) => {
-              const isSelected = selectedServiceName === srv;
-              return (
-                <motion.button
-                  key={idx}
-                  type="button"
-                  whileTap={{ scale: 0.94 }}
-                  onClick={() => setSelectedServiceName(srv)}
-                  className={
-                    isSelected
-                      ? 'px-4 py-2.5 rounded-full bg-[#0F2A1D] text-[#E3EED4] border border-[#0F2A1D] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-xs'
-                      : 'px-4 py-2.5 rounded-full bg-white hover:bg-[#F6F8F3] text-[#0F2A1D] border border-[#AEC3B0] text-xs font-extrabold inline-flex items-center gap-1.5'
-                  }
-                >
-                  <Check
+        <div className="relative z-10 space-y-5">
+          <div className="space-y-1.5 max-w-2xl">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#375534] text-[#E3EED4] text-xs font-extrabold">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Layanan Pembuatan Digital Kustom</span>
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              {customService.title}
+            </h1>
+            <p className="text-xs sm:text-sm text-[#AEC3B0] leading-relaxed">
+              {customService.description}
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#AEC3B0]">
+              1. Pilih jenis layanan yang ingin dibuat:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {customService.services.map((srv, idx) => {
+                const isSelected = selectedServiceName === srv;
+                return (
+                  <motion.button
+                    key={idx}
+                    type="button"
+                    whileTap={{ scale: 0.94 }}
+                    onClick={() => setSelectedServiceName(srv)}
                     className={
                       isSelected
-                        ? 'w-3.5 h-3.5 text-[#E3EED4] shrink-0'
-                        : 'w-3.5 h-3.5 text-[#375534] shrink-0'
+                        ? 'px-4 py-2.5 rounded-full bg-[#E3EED4] text-[#0F2A1D] border border-[#E3EED4] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-xs'
+                        : 'px-4 py-2.5 rounded-full bg-[#375534]/60 hover:bg-[#375534] text-white border border-[#6B9071]/50 text-xs font-bold inline-flex items-center gap-1.5'
                     }
-                  />
-                  <span>{srv}</span>
-                </motion.button>
-              );
-            })}
+                  >
+                    <Check
+                      className={
+                        isSelected
+                          ? 'w-3.5 h-3.5 text-[#0F2A1D] shrink-0'
+                          : 'w-3.5 h-3.5 text-[#AEC3B0] shrink-0'
+                      }
+                    />
+                    <span>{srv}</span>
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        <div className="space-y-2">
-          <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#375534]">
-            2. Gambaran singkat kebutuhanmu (Opsional — langsung terisi di chat):
-          </label>
-          <textarea
-            rows={2}
-            value={customBriefNote}
-            onChange={(e) => setCustomBriefNote(e.target.value)}
-            placeholder={`Contoh: Saya butuh ${selectedServiceName} untuk keperluan tugas/bisnis, target selesai 2 hari...`}
-            className="w-full px-4 py-3 rounded-2xl bg-white border border-[#AEC3B0] text-xs sm:text-sm text-[#0F2A1D] focus:outline-none focus:border-[#0F2A1D]"
-          />
-        </div>
+          <div className="space-y-2">
+            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#AEC3B0]">
+              2. Jelaskan singkat kebutuhanmu (Opsional — otomatis masuk ke chat):
+            </label>
+            <textarea
+              rows={2}
+              value={customBriefNote}
+              onChange={(e) => setCustomBriefNote(e.target.value)}
+              placeholder={`Contoh: Saya butuh ${selectedServiceName} untuk keperluan tugas/bisnis, target selesai 2 hari...`}
+              className="w-full px-4 py-3 rounded-2xl bg-[#375534]/55 border border-[#6B9071]/50 text-xs sm:text-sm text-white placeholder:text-[#AEC3B0]/80 focus:outline-none focus:border-[#E3EED4]"
+            />
+          </div>
 
-        <div className="space-y-2">
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#375534]">
-            3. Hubungi Admin untuk diskusi &amp; penetapan harga (Pembayaran QRIS dilakukan di website):
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            {customWaLink && (
-              <a
-                href={customWaLink}
-                target="_blank"
-                rel="noreferrer"
-                className="px-5 py-3.5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-white text-xs sm:text-sm font-extrabold inline-flex items-center gap-2 shadow-sm"
-              >
-                <MessageCircle className="w-4 h-4 text-[#E3EED4]" />
-                <span>Diskusi via WhatsApp</span>
-              </a>
-            )}
-            {customTgLink && (
-              <a
-                href={customTgLink}
-                target="_blank"
-                rel="noreferrer"
-                className="px-5 py-3.5 rounded-full bg-white hover:bg-[#375534] text-[#0F2A1D] hover:text-white border-2 border-[#0F2A1D] text-xs sm:text-sm font-extrabold inline-flex items-center gap-2 shadow-2xs"
-              >
-                <Send className="w-4 h-4" />
-                <span>Diskusi via Telegram</span>
-              </a>
-            )}
-            {!customWaLink && !customTgLink && (
-              <p className="text-xs font-bold text-[#375534]">
-                * Kontak WhatsApp / Telegram Admin belum diatur di Pengaturan.
-              </p>
+          <div className="space-y-2.5">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#AEC3B0]">
+              3. Diskusi &amp; deal harga langsung dengan Admin (Pembayaran QRIS dilakukan di website):
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              {customWaLink && (
+                <a
+                  href={customWaLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-5 py-3.5 rounded-full bg-[#E3EED4] hover:bg-white text-[#0F2A1D] text-xs sm:text-sm font-extrabold inline-flex items-center gap-2 shadow-sm"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Diskusi via WhatsApp</span>
+                </a>
+              )}
+              {customTgLink && (
+                <a
+                  href={customTgLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-5 py-3.5 rounded-full bg-[#375534] hover:bg-[#496e45] text-white border border-[#AEC3B0]/40 text-xs sm:text-sm font-extrabold inline-flex items-center gap-2 shadow-2xs"
+                >
+                  <Send className="w-4 h-4 text-[#E3EED4]" />
+                  <span>Diskusi via Telegram</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* Tautan Ringkas Pembuka Kolom Transaksi (Hanya jika klien ingin ketik kode manual) */}
+          <div className="pt-3 border-t border-[#375534]">
+            <button
+              type="button"
+              onClick={() => setShowManualBillInput((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#AEC3B0] hover:text-white transition-colors"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>
+                Sudah deal dengan Admin &amp; punya Kode Transaksi? Buka pembayaran di sini
+              </span>
+              <ChevronDown
+                className={
+                  showManualBillInput
+                    ? 'w-3.5 h-3.5 rotate-180 transition-transform'
+                    : 'w-3.5 h-3.5 transition-transform'
+                }
+              />
+            </button>
+
+            {showManualBillInput && (
+              <div className="mt-3 space-y-2.5">
+                <form
+                  onSubmit={handleCheckFormSubmit}
+                  className="flex flex-col sm:flex-row gap-2.5"
+                >
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-[#AEC3B0] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={orderCodeInput}
+                      onChange={(e) =>
+                        setOrderCodeInput(e.target.value.toUpperCase())
+                      }
+                      placeholder="Masukkan Kode Transaksi (Contoh: KST-4829)"
+                      className="w-full pl-11 pr-4 py-3 rounded-full bg-[#375534]/75 border border-[#6B9071]/60 text-xs sm:text-sm font-extrabold tracking-wider uppercase text-white placeholder:font-normal placeholder:tracking-normal placeholder:text-[#AEC3B0] focus:outline-none focus:border-[#E3EED4]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isCheckingCode || !orderCodeInput.trim()}
+                    className="px-6 py-3 rounded-full bg-[#E3EED4] hover:bg-white text-[#0F2A1D] font-extrabold text-xs inline-flex items-center justify-center gap-2 shrink-0"
+                  >
+                    {isCheckingCode ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Membuka...</span>
+                      </>
+                    ) : (
+                      <span>Buka Tagihan</span>
+                    )}
+                  </button>
+                </form>
+
+                {checkError && (
+                  <div className="p-3 rounded-2xl bg-red-950/80 border border-red-400/40 text-red-200 text-xs font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-300" />
+                    <span>{checkError}</span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
       </section>
 
       {/* ==================================================================== */}
-      {/* 3. KLAIM GARANSI & TANYA ADMIN (FORMULIR WEB + JALUR CHAT LANGSUNG) */}
+      {/* 2. KLAIM GARANSI & TANYA ADMIN (FORMULIR WEB + JALUR CHAT LANGSUNG) */}
       {/* ==================================================================== */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div className="lg:col-span-7 bg-white border border-[#AEC3B0]/60 rounded-[28px] p-6 sm:p-7 rf-card-shadow space-y-5">
@@ -918,7 +914,6 @@ export default function ServicesTabView({
             </p>
           </div>
 
-          {/* Pilihan Jalur Chat Langsung untuk Garansi & Bantuan */}
           {(supportWaLink || supportTgLink) && (
             <div className="p-3.5 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <span className="text-xs font-extrabold text-[#0F2A1D]">

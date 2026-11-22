@@ -40,6 +40,7 @@ import {
 import AdminDashboardTab from '@/components/admin/AdminDashboardTab';
 import AdminCatalogTab from '@/components/admin/AdminCatalogTab';
 import AdminServicesTab from '@/components/admin/AdminServicesTab';
+import AdminDashboardView from '@/components/admin/AdminDashboardView';
 import AdminPromosSettingsTab from '@/components/admin/AdminPromosSettingsTab';
 
 interface PendingCounts {
@@ -631,19 +632,10 @@ export default function AdminDashboardPage() {
         )}
 
         {activeTab === 'dashboard' && (
-          <AdminDashboardTab
-            orders={orders}
-            products={products}
-            categories={categories}
-            supportMessages={supportMessages}
-            customOrders={customOrders}
-            notifPermission={notifPermission}
-            resendingOrderId={resendingOrderId}
-            onEnableNotifications={handleEnableBrowserNotifications}
-            onInstallPwa={handleInstallPwaApp}
-            onResendEmail={handleResendDownloadEmail}
-            onSelectTab={selectTab}
-            onOpenServicesSubTab={setServicesSubTab}
+          <AdminDashboardView
+            accessToken={accessToken}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onShowFeedback={showMessage}
           />
         )}
 
