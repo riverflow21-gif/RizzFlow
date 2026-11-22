@@ -28,7 +28,10 @@ import { ServicesSubTab } from './AdminTypes';
 interface AdminServicesTabProps {
   accessToken: string;
   customOrders: CustomProjectOrder[];
-  messages: CustomerSupportMessage[];
+  supportMessages?: CustomerSupportMessage[];
+  messages?: CustomerSupportMessage[];
+  servicesSubTab?: ServicesSubTab;
+  onChangeSubTab?: (tab: ServicesSubTab) => void;
   onUpdateCustomOrders: (next: CustomProjectOrder[]) => void;
   onUpdateMessages: (next: CustomerSupportMessage[]) => void;
   onShowFeedback: (type: 'success' | 'error', message: string) => void;
@@ -39,12 +42,28 @@ const STORE_PUBLIC_URL = 'https://rizzflow-theta.vercel.app';
 export default function AdminServicesTab({
   accessToken,
   customOrders,
+  supportMessages,
   messages,
+  servicesSubTab,
+  onChangeSubTab,
   onUpdateCustomOrders,
   onUpdateMessages,
   onShowFeedback,
 }: AdminServicesTabProps) {
-  const [subTab, setSubTab] = useState('CUSTOM_ORDERS' as ServicesSubTab);
+  const [internalSubTab, setInternalSubTab] = useState(
+    'CUSTOM_ORDERS' as ServicesSubTab
+  );
+
+  const subTab = servicesSubTab ?? internalSubTab;
+  const setSubTab = (next: ServicesSubTab) => {
+    if (onChangeSubTab) {
+      onChangeSubTab(next);
+    } else {
+      setInternalSubTab(next);
+    }
+  };
+
+  const messagesList = supportMessages ?? messages ?? [];
 
   // State Form Buat Tagihan Kustom Baru (Setelah Deal via Chat)
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -393,7 +412,7 @@ export default function AdminServicesTab({
     }
   };
 
-  const unreadCount = messages.filter((m) => m.status === 'BARU').length;
+  const unreadCount = messagesList.filter((m) => m.status === 'BARU').length;
   const activeBillsCount = customOrders.filter(
     (o) => o.status !== 'LUNAS' && o.status !== 'DIBATALKAN'
   ).length;
@@ -893,16 +912,16 @@ export default function AdminServicesTab({
       {subTab === 'INBOX_MESSAGES' && (
         <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#AEC3B0]/60 rf-card-shadow space-y-4">
           <h3 className="text-base font-extrabold text-[#0F2A1D]">
-            Kotak Masuk Klaim Garansi &amp; Pertanyaan ({messages.length})
+            Kotak Masuk Klaim Garansi &amp; Pertanyaan ({messagesList.length})
           </h3>
 
-          {messages.length === 0 ? (
+          {messagesList.length === 0 ? (
             <p className="text-xs sm:text-sm text-[#6B9071] text-center py-8">
               Belum ada klaim garansi atau pertanyaan masuk.
             </p>
           ) : (
             <div className="space-y-3">
-              {messages.map((msg) => (
+              {messagesList.map((msg) => (
                 <div
                   key={msg.id}
                   className="p-4 rounded-2xl bg-[#F6F8F3] border border-[#AEC3B0]/70 space-y-2.5"
