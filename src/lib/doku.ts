@@ -7,6 +7,10 @@ export interface DokuQrisResult {
 
 const OFFICIAL_VERCEL_URL = 'https://rizzflow-theta.vercel.app';
 
+// Cache Token B2B SNAP di memori selama 12 menit (token resmi DOKU berlaku 15 menit)
+// agar auto-cek tiap 3 detik jauh lebih cepat & tidak kena rate-limit DOKU.
+let cachedSnapToken: { token: string; expiresAt: number } | null = null;
+
 /**
  * Menghitung potongan diskon kode promo dan total akhir pembayaran.
  */
@@ -49,19 +53,12 @@ function getPublicAppUrl(): string {
   return OFFICIAL_VERCEL_URL;
 }
 
-/**
- * Format waktu WIB (+07:00) sesuai standar resmi BI-SNAP DOKU.
- * Contoh: 2026-11-22T13:15:00+07:00
- */
 function formatWibTimestamp(dateObj: Date): string {
   const wibMs = dateObj.getTime() + 7 * 60 * 60 * 1000;
   const wibDate = new Date(wibMs);
   return wibDate.toISOString().slice(0, 19) + '+07:00';
 }
 
-/**
- * Merapikan format Private Key PEM dari Environment Variable Vercel.
- */
 function normalizePrivateKeyPem(rawKey: string): string {
   const trimmed = rawKey.trim().replace(/^["']|["']$/g, '');
   return trimmed.replace(/\\n/g, '\n');
@@ -74,13 +71,22 @@ function hasSnapDirectQrisConfig(): boolean {
 }
 
 /**
- * Mengambil B2B Access Token dari DOKU SNAP menggunakan RSA-SHA256.
+ * Mengambil B2B Access Token dari DOKU SNAP (dengan cache 12 menit).
  */
 async function getSnapB2BToken(
   baseUrl: string,
   clientId: string,
-  privateKeyPem: string
+  privateKeyPem: string,
+  forceRefresh = false
 ): Promise<string> {
+  if (
+    !forceRefresh &&
+    cachedSnapToken &&
+    Date.now() < cachedSnapToken.expiresAt
+  ) {
+    return cachedSnapToken.token;
+  }
+
   const timestamp = formatWibTimestamp(new Date());
   const stringToSign = `${clientId}|${timestamp}`;
 
@@ -101,7 +107,11 @@ async function getSnapB2BToken(
   });
 
   const rawText = await response.text();
-  let parsed: { accessToken?: string; responseMessage?: string } = {};
+  let parsed: {
+    accessToken?: string;
+    expiresIn?: number | string;
+    responseMessage?: string;
+  } = {};
   try {
     parsed = JSON.parse(rawText);
   } catch {
@@ -114,12 +124,16 @@ async function getSnapB2BToken(
     );
   }
 
+  const expiresInSec = Number(parsed.expiresIn) || 900;
+  const safeTtlMs = Math.max(60, expiresInSec - 180) * 1000;
+  cachedSnapToken = {
+    token: parsed.accessToken,
+    expiresAt: Date.now() + safeTtlMs,
+  };
+
   return parsed.accessToken;
 }
 
-/**
- * Membuat Symmetric Signature HMAC-SHA512 standar resmi BI-SNAP DOKU.
- */
 function generateSnapSymmetricSignature(params: {
   httpMethod: string;
   endpointPath: string;
@@ -142,11 +156,6 @@ function generateSnapSymmetricSignature(params: {
     .digest('base64');
 }
 
-/**
- * MODE 1 (UTAMA): DOKU DIRECT API SNAP QRIS
- * Mengembalikan string barcode asli `qrContent` untuk ditampilkan 100%
- * di desain halaman website RizzFlow sendiri (tanpa halaman merah DOKU).
- */
 async function createSnapDirectQris(params: {
   baseUrl: string;
   clientId: string;
@@ -228,6 +237,9 @@ async function createSnapDirectQris(params: {
   }
 
   if (!response.ok || !data.qrContent) {
+    if (response.status === 401) {
+      cachedSnapToken = null;
+    }
     throw new Error(
       `DOKU Direct QRIS Error (${data.responseCode || response.status}): ${
         data.responseMessage || rawText.slice(0, 150)
@@ -241,9 +253,6 @@ async function createSnapDirectQris(params: {
   };
 }
 
-/**
- * Mengecek status pembayaran QRIS Direct API langsung ke DOKU SNAP.
- */
 async function checkSnapQrisStatus(
   baseUrl: string,
   clientId: string,
@@ -253,47 +262,57 @@ async function checkSnapQrisStatus(
   invoiceNumber: string
 ): Promise<'SUCCESS' | 'PENDING' | 'FAILED' | 'EXPIRED' | 'UNKNOWN'> {
   try {
-    const accessToken = await getSnapB2BToken(
-      baseUrl,
-      clientId,
-      privateKeyPem
-    );
+    const runQuery = async (forceRefreshToken: boolean) => {
+      const accessToken = await getSnapB2BToken(
+        baseUrl,
+        clientId,
+        privateKeyPem,
+        forceRefreshToken
+      );
 
-    const endpointPath = '/snap-adapter/b2b/v1.0/qr/qr-mpm-query';
-    const timestamp = formatWibTimestamp(new Date());
-    const externalId = `${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`;
+      const endpointPath = '/snap-adapter/b2b/v1.0/qr/qr-mpm-query';
+      const timestamp = formatWibTimestamp(new Date());
+      const externalId = `${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const bodyObj = {
-      originalReferenceNo: invoiceNumber,
-      originalPartnerReferenceNo: invoiceNumber,
-      merchantId,
-      serviceCode: '47',
+      const bodyObj = {
+        originalReferenceNo: invoiceNumber,
+        originalPartnerReferenceNo: invoiceNumber,
+        merchantId,
+        serviceCode: '47',
+      };
+
+      const minifiedBody = JSON.stringify(bodyObj);
+      const signature = generateSnapSymmetricSignature({
+        httpMethod: 'POST',
+        endpointPath,
+        accessToken,
+        minifiedBody,
+        timestamp,
+        secretKey,
+      });
+
+      return fetch(`${baseUrl}${endpointPath}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-PARTNER-ID': clientId,
+          'X-EXTERNAL-ID': externalId,
+          'X-TIMESTAMP': timestamp,
+          'X-SIGNATURE': signature,
+          Authorization: `Bearer ${accessToken}`,
+          'CHANNEL-ID': 'H2H',
+        },
+        body: minifiedBody,
+        cache: 'no-store',
+      });
     };
 
-    const minifiedBody = JSON.stringify(bodyObj);
-    const signature = generateSnapSymmetricSignature({
-      httpMethod: 'POST',
-      endpointPath,
-      accessToken,
-      minifiedBody,
-      timestamp,
-      secretKey,
-    });
-
-    const response = await fetch(`${baseUrl}${endpointPath}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-PARTNER-ID': clientId,
-        'X-EXTERNAL-ID': externalId,
-        'X-TIMESTAMP': timestamp,
-        'X-SIGNATURE': signature,
-        Authorization: `Bearer ${accessToken}`,
-        'CHANNEL-ID': 'H2H',
-      },
-      body: minifiedBody,
-      cache: 'no-store',
-    });
+    let response = await runQuery(false);
+    // Jika token cache kebetulan kedaluwarsa (401), otomatis refresh token 1 kali
+    if (response.status === 401) {
+      cachedSnapToken = null;
+      response = await runQuery(true);
+    }
 
     if (!response.ok) return 'UNKNOWN';
 
@@ -380,8 +399,6 @@ export async function createDokuQrisPayment(params: {
 
   const baseUrl = getDokuBaseUrl();
 
-  // PRIORITAS UTAMA: Jika DOKU_PRIVATE_KEY & DOKU_QRIS_MERCHANT_ID diisi,
-  // pakai Direct API SNAP QRIS agar barcode tampil 100% di desain website kamu sendiri!
   if (hasSnapDirectQrisConfig()) {
     const privateKeyPem = normalizePrivateKeyPem(
       process.env.DOKU_PRIVATE_KEY || ''
@@ -399,7 +416,6 @@ export async function createDokuQrisPayment(params: {
     });
   }
 
-  // CADANGAN (Jika kunci Direct API belum diisi): Pakai DOKU Checkout
   const appUrl = getPublicAppUrl();
   const isProductionServer =
     baseUrl.includes('api.doku.com') && !baseUrl.includes('sandbox');
@@ -530,7 +546,6 @@ export async function checkDokuOrderStatus(
 
   const baseUrl = getDokuBaseUrl();
 
-  // Jika menggunakan Direct API SNAP QRIS, cek status via qr-mpm-query dulu
   if (hasSnapDirectQrisConfig()) {
     const privateKeyPem = normalizePrivateKeyPem(
       process.env.DOKU_PRIVATE_KEY || ''
@@ -549,7 +564,6 @@ export async function checkDokuOrderStatus(
     }
   }
 
-  // Fallback Check Status Non-SNAP (DOKU Checkout)
   try {
     const requestTarget = `/orders/v1/status/${encodeURIComponent(invoiceNumber)}`;
     const requestId = crypto.randomUUID();

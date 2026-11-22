@@ -17,7 +17,6 @@ import {
   Sparkles,
   ShoppingBag,
   Download,
-  RefreshCw,
 } from 'lucide-react';
 import { CartItem, Order } from '@/types';
 import {
@@ -107,10 +106,6 @@ function checkClientEmailFormat(raw: string): {
   return { valid: true, errorText: '' };
 }
 
-/**
- * Cadangan pop-up pembayaran jika URL pembayaran berupa link halaman (http/https).
- * Jika Direct API QRIS sudah aktif, kode barcode langsung tampil di halaman RizzFlow sendiri.
- */
 function openPaymentPopupOverlay(paymentUrl: string): Promise<boolean> {
   return new Promise((resolve) => {
     const win = window as unknown as {
@@ -160,6 +155,7 @@ function openPaymentPopupOverlay(paymentUrl: string): Promise<boolean> {
 export default function CheckoutPage() {
   const qrisBoxRef = useRef(null as HTMLDivElement | null);
   const hasAutoOpenedPopupRef = useRef(false);
+  const isPollingInFlightRef = useRef(false);
 
   const [cart, setCart] = useState([] as CartItem[]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -176,33 +172,55 @@ export default function CheckoutPage() {
   const [activeOrder, setActiveOrder] = useState(null as NullableOrder);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
-  const [isCheckingStatusNow, setIsCheckingStatusNow] = useState(false);
   const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
-  // Fungsi pengecekan status pesanan langsung ke server backend
-  const fetchOrderStatus = useCallback(async (invoiceNumber: string) => {
-    try {
-      const res = await fetch(
-        `/api/orders/${encodeURIComponent(invoiceNumber)}`,
-        { cache: 'no-store' }
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { order?: Order };
-        if (data.order) {
-          setActiveOrder(data.order);
-          if (data.order.payment_status === 'PAID') {
-            localStorage.removeItem(CART_STORAGE_KEY);
-            setCart([]);
+  /**
+   * Mengecek status pembayaran ke backend secara senyap tanpa me-reset timer.
+   * Hanya memperbarui state jika data order baru dimuat atau status berubah (misal PENDING -> PAID).
+   */
+  const fetchOrderStatus = useCallback(
+    async (invoiceNumber: string, forceSet = false) => {
+      if (isPollingInFlightRef.current && !forceSet) return null;
+      isPollingInFlightRef.current = true;
+
+      try {
+        const res = await fetch(
+          `/api/orders/${encodeURIComponent(invoiceNumber)}?t=${Date.now()}`,
+          { cache: 'no-store' }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { order?: Order };
+          if (data.order) {
+            const latestOrder = data.order;
+            setActiveOrder((prev) => {
+              if (
+                forceSet ||
+                !prev ||
+                prev.id !== latestOrder.id ||
+                prev.payment_status !== latestOrder.payment_status
+              ) {
+                return latestOrder;
+              }
+              return prev;
+            });
+
+            if (latestOrder.payment_status === 'PAID') {
+              localStorage.removeItem(CART_STORAGE_KEY);
+              setCart([]);
+            }
+            return latestOrder;
           }
-          return data.order;
         }
+      } catch {
+        // Abaikan gangguan jaringan sementara
+      } finally {
+        isPollingInFlightRef.current = false;
       }
-    } catch {
-      // Abaikan gangguan jaringan sementara
-    }
-    return null;
-  }, []);
+      return null;
+    },
+    []
+  );
 
   // Muat keranjang & cek apakah URL membawa ?invoice=INV-...
   useEffect(() => {
@@ -219,7 +237,7 @@ export default function CheckoutPage() {
         const params = new URLSearchParams(window.location.search);
         const invoiceFromUrl = (params.get('invoice') || '').trim();
         if (invoiceFromUrl) {
-          await fetchOrderStatus(invoiceFromUrl);
+          await fetchOrderStatus(invoiceFromUrl, true);
         }
       } catch (e) {
         console.error('Gagal memuat checkout:', e);
@@ -240,13 +258,16 @@ export default function CheckoutPage() {
   const finalAmount = Math.max(0, subtotalAmount - discountAmount);
   const hasDiscount = discountAmount !== 0;
 
+  const activeInvoice = activeOrder?.invoice_number || '';
+  const activeStatus = activeOrder?.payment_status || '';
+  const activeExpiresAt = activeOrder?.qris_expires_at || '';
+
   // Hitung mundur kedaluwarsa QRIS
   useEffect(() => {
-    if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
+    if (!activeInvoice || activeStatus !== 'PENDING' || !activeExpiresAt) return;
 
     const updateTimer = () => {
-      if (!activeOrder.qris_expires_at) return;
-      const expiresMs = new Date(activeOrder.qris_expires_at).getTime();
+      const expiresMs = new Date(activeExpiresAt).getTime();
       const diffSec = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000));
       setRemainingSeconds(diffSec);
     };
@@ -254,9 +275,9 @@ export default function CheckoutPage() {
     updateTimer();
     const timerId = setInterval(updateTimer, 1000);
     return () => clearInterval(timerId);
-  }, [activeOrder]);
+  }, [activeInvoice, activeStatus, activeExpiresAt]);
 
-  // Jika URL pembayaran berupa link http (fallback), buka pop-up otomatis di atas halaman ini
+  // Auto-buka pop-up pembayaran jika URL berupa link http
   useEffect(() => {
     if (
       activeOrder &&
@@ -270,23 +291,33 @@ export default function CheckoutPage() {
     }
   }, [activeOrder]);
 
-  // Polling otomatis setiap 4 detik untuk deteksi pembayaran lunas
+  // VERIFIKASI OTOMATIS PENUH:
+  // 1. Cek otomatis setiap 3 detik (tanpa me-reset interval).
+  // 2. Cek INSTAN (0 detik) begitu pembeli kembali dari GoPay/DANA/M-Banking ke Chrome/Safari!
   useEffect(() => {
-    if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
+    if (!activeInvoice || activeStatus !== 'PENDING') return;
+
+    const triggerInstantCheck = () => {
+      if (document.visibilityState === 'visible') {
+        fetchOrderStatus(activeInvoice);
+      }
+    };
 
     const pollId = setInterval(() => {
-      fetchOrderStatus(activeOrder.invoice_number);
-    }, 4000);
+      fetchOrderStatus(activeInvoice);
+    }, 3000);
 
-    return () => clearInterval(pollId);
-  }, [activeOrder, fetchOrderStatus]);
+    document.addEventListener('visibilitychange', triggerInstantCheck);
+    window.addEventListener('focus', triggerInstantCheck);
+    window.addEventListener('online', triggerInstantCheck);
 
-  const handleManualCheckStatus = async () => {
-    if (!activeOrder) return;
-    setIsCheckingStatusNow(true);
-    await fetchOrderStatus(activeOrder.invoice_number);
-    setIsCheckingStatusNow(false);
-  };
+    return () => {
+      clearInterval(pollId);
+      document.removeEventListener('visibilitychange', triggerInstantCheck);
+      window.removeEventListener('focus', triggerInstantCheck);
+      window.removeEventListener('online', triggerInstantCheck);
+    };
+  }, [activeInvoice, activeStatus, fetchOrderStatus]);
 
   const handleValidatePromo = async () => {
     const cleanCode = promoInput.trim().toUpperCase();
@@ -391,10 +422,6 @@ export default function CheckoutPage() {
     }
   };
 
-  /**
-   * Menyimpan kode QRIS sebagai gambar PNG tajam berlatar putih
-   * agar langsung terbaca saat diunggah ke galeri GoPay, DANA, OVO, ShopeePay, dan M-Banking.
-   */
   const handleDownloadQrisImage = () => {
     if (!activeOrder || !qrisBoxRef.current) return;
     const svgEl = qrisBoxRef.current.querySelector('svg');
@@ -514,7 +541,7 @@ export default function CheckoutPage() {
       });
 
       if (res.ok) {
-        await fetchOrderStatus(activeOrder.invoice_number);
+        await fetchOrderStatus(activeOrder.invoice_number, true);
       }
     } catch (e) {
       console.error('Gagal simulasi pembayaran:', e);
@@ -571,7 +598,7 @@ export default function CheckoutPage() {
                   <CheckCircle2 className="w-9 h-9 text-[#375534]" />
                 </div>
                 <span className="inline-block px-3.5 py-1 rounded-full bg-[#E3EED4] text-[#0F2A1D] text-xs font-extrabold">
-                  Pembayaran Berhasil Diterima!
+                  Pembayaran Berhasil Terverifikasi Otomatis!
                 </span>
                 <h1 className="text-2xl font-extrabold text-[#0F2A1D]">
                   Terima Kasih Atas Pembelianmu
@@ -627,6 +654,17 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
+                {/* INDIKATOR VERIFIKASI OTOMATIS (TANPA PERLU PENCET TOMBOL) */}
+                <div className="px-4 py-2.5 rounded-2xl bg-[#E3EED4]/75 border border-[#6B9071]/50 inline-flex items-center justify-center gap-2 text-xs font-bold text-[#0F2A1D]">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#375534] opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#0F2A1D]" />
+                  </span>
+                  <span>
+                    Verifikasi otomatis aktif — produk langsung terkirim setelah bayar
+                  </span>
+                </div>
+
                 {/* AREA TAMPILAN QRIS BERSIH DENGAN DESAIN RIZZFLOW SENDIRI */}
                 <div className="w-full space-y-3">
                   {activeOrder.qris_string &&
@@ -656,26 +694,6 @@ export default function CheckoutPage() {
                       >
                         <QrCode className="w-4 h-4" />
                         <span>Tampilkan Kode QRIS &amp; Simpan</span>
-                      </motion.button>
-
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.96 }}
-                        disabled={isCheckingStatusNow}
-                        onClick={handleManualCheckStatus}
-                        className="w-full py-3 px-5 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071] font-extrabold text-xs inline-flex items-center justify-center gap-2 transition-colors"
-                      >
-                        {isCheckingStatusNow ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Memverifikasi Pembayaran...</span>
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            <span>Saya Sudah Bayar — Cek Status Sekarang</span>
-                          </>
-                        )}
                       </motion.button>
                     </div>
                   ) : (
@@ -708,7 +726,7 @@ export default function CheckoutPage() {
                       </div>
 
                       {activeOrder.qris_string && (
-                        <div className="space-y-2.5">
+                        <div>
                           <motion.button
                             type="button"
                             whileTap={{ scale: 0.96 }}
@@ -728,28 +746,6 @@ export default function CheckoutPage() {
                               </>
                             )}
                           </motion.button>
-
-                          {!isSimulationMode && (
-                            <motion.button
-                              type="button"
-                              whileTap={{ scale: 0.96 }}
-                              disabled={isCheckingStatusNow}
-                              onClick={handleManualCheckStatus}
-                              className="w-full py-3 px-5 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071] font-extrabold text-xs inline-flex items-center justify-center gap-2 transition-colors"
-                            >
-                              {isCheckingStatusNow ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span>Memverifikasi Pembayaran...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>Saya Sudah Bayar — Cek Status Sekarang</span>
-                                </>
-                              )}
-                            </motion.button>
-                          )}
                         </div>
                       )}
                     </div>
@@ -757,7 +753,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <p className="text-xs text-[#6B9071] max-w-sm mx-auto leading-relaxed">
-                  Setelah selesai membayar via GoPay, DANA, OVO, ShopeePay, atau M-Banking, halaman ini otomatis memperbarui status menjadi Lunas dan mengirim file ke emailmu.
+                  Tidak perlu menekan tombol konfirmasi. Begitu pembayaranmu berhasil di aplikasi E-Wallet atau M-Banking, halaman ini langsung berubah Lunas dan file otomatis masuk ke emailmu.
                 </p>
 
                 {isSimulationMode && (
