@@ -10,6 +10,7 @@ import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
 import { Order, OrderItem, Product } from '@/types';
 
 interface DokuWebhookBody {
+  // Format Non-SNAP (DOKU Checkout)
   order?: {
     invoice_number?: string;
     amount?: number;
@@ -18,9 +19,14 @@ interface DokuWebhookBody {
     status?: string;
     date?: string;
   };
+  // Format SNAP (DOKU Direct API QRIS)
+  originalPartnerReferenceNo?: string;
+  originalReferenceNo?: string;
+  latestTransactionStatus?: string;
+  transactionStatusDesc?: string;
 }
 
-function checkDokuSignature(params: {
+function checkNonSnapSignature(params: {
   clientId: string;
   requestId: string;
   requestTimestamp: string;
@@ -52,9 +58,57 @@ function checkDokuSignature(params: {
   return params.signatureHeader === expectedSignature;
 }
 
+function checkSnapWebhookSignature(params: {
+  xSignature: string;
+  xTimestamp: string;
+  rawBody: string;
+  authHeader: string;
+}): boolean {
+  const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
+  if (!secretKey || !params.xSignature || !params.xTimestamp) return false;
+
+  const accessToken = params.authHeader.replace(/^Bearer\s+/i, '').trim();
+  let minifiedBody = params.rawBody;
+  try {
+    minifiedBody = JSON.stringify(JSON.parse(params.rawBody));
+  } catch {
+    // Gunakan rawBody asli
+  }
+
+  const bodyHash = crypto
+    .createHash('sha256')
+    .update(minifiedBody, 'utf8')
+    .digest('hex')
+    .toLowerCase();
+
+  const endpointPath = '/api/webhooks/doku';
+  const stringToSign = accessToken
+    ? `POST:${endpointPath}:${accessToken}:${bodyHash}:${params.xTimestamp}`
+    : `POST:${endpointPath}:${bodyHash}:${params.xTimestamp}`;
+
+  const expectedBase64 = crypto
+    .createHmac('sha512', secretKey)
+    .update(stringToSign, 'utf8')
+    .digest('base64');
+
+  const expectedHex = crypto
+    .createHmac('sha512', secretKey)
+    .update(stringToSign, 'utf8')
+    .digest('hex')
+    .toLowerCase();
+
+  return (
+    params.xSignature === expectedBase64 ||
+    params.xSignature.toLowerCase() === expectedHex
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
+    const configuredClientId = (process.env.DOKU_CLIENT_ID || '').trim();
+
+    // Header Non-SNAP
     const clientId = (request.headers.get('Client-Id') || '').trim();
     const requestId = (request.headers.get('Request-Id') || '').trim();
     const requestTimestamp = (
@@ -62,40 +116,72 @@ export async function POST(request: Request) {
     ).trim();
     const signatureHeader = (request.headers.get('Signature') || '').trim();
 
+    // Header SNAP
+    const xSignature = (request.headers.get('X-SIGNATURE') || '').trim();
+    const xTimestamp = (request.headers.get('X-TIMESTAMP') || '').trim();
+    const xPartnerId = (request.headers.get('X-PARTNER-ID') || '').trim();
+    const authHeader = (request.headers.get('Authorization') || '').trim();
+
+    const isSnapRequest = Boolean(xSignature || xPartnerId);
     const isSimulationMode = process.env.DOKU_SIMULATION_MODE === 'true';
     const isSimulationBypass =
       isSimulationMode && signatureHeader === 'SIMULATION_BYPASS';
 
     if (!isSimulationBypass) {
-      // 1. Validasi Client-Id harus cocok dengan akun DOKU kita
-      const configuredClientId = (process.env.DOKU_CLIENT_ID || '').trim();
-      if (!configuredClientId || clientId !== configuredClientId) {
-        return NextResponse.json(
-          { error: 'Invalid DOKU Client ID' },
-          { status: 401 }
-        );
-      }
+      if (isSnapRequest) {
+        if (xPartnerId && configuredClientId && xPartnerId !== configuredClientId) {
+          return NextResponse.json(
+            { responseCode: '4015600', responseMessage: 'Invalid Partner ID' },
+            { status: 401 }
+          );
+        }
+        const snapValid = checkSnapWebhookSignature({
+          xSignature,
+          xTimestamp,
+          rawBody,
+          authHeader,
+        });
+        if (!snapValid) {
+          return NextResponse.json(
+            { responseCode: '4015600', responseMessage: 'Unauthorized Signature' },
+            { status: 401 }
+          );
+        }
+      } else {
+        if (!configuredClientId || clientId !== configuredClientId) {
+          return NextResponse.json(
+            { error: 'Invalid DOKU Client ID' },
+            { status: 401 }
+          );
+        }
 
-      // 2. Validasi Signature HMAC-SHA256
-      const isValid = checkDokuSignature({
-        clientId,
-        requestId,
-        requestTimestamp,
-        rawBody,
-        signatureHeader,
-      });
+        const isValid = checkNonSnapSignature({
+          clientId,
+          requestId,
+          requestTimestamp,
+          rawBody,
+          signatureHeader,
+        });
 
-      if (!isValid) {
-        return NextResponse.json(
-          { error: 'Invalid DOKU Webhook Signature' },
-          { status: 401 }
-        );
+        if (!isValid) {
+          return NextResponse.json(
+            { error: 'Invalid DOKU Webhook Signature' },
+            { status: 401 }
+          );
+        }
       }
     }
 
     const payload = JSON.parse(rawBody) as DokuWebhookBody;
-    const invoiceNumber = payload.order?.invoice_number;
-    const transactionStatus = payload.transaction?.status;
+    const invoiceNumber =
+      payload.order?.invoice_number ||
+      payload.originalPartnerReferenceNo ||
+      payload.originalReferenceNo;
+
+    const isSuccessStatus =
+      payload.transaction?.status === 'SUCCESS' ||
+      payload.latestTransactionStatus === '00' ||
+      (payload.transactionStatusDesc || '').toUpperCase() === 'SUCCESS';
 
     if (!invoiceNumber) {
       return NextResponse.json(
@@ -104,9 +190,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Hanya proses jika status transaksi benar-benar SUCCESS
-    if (transactionStatus !== 'SUCCESS') {
-      return NextResponse.json({ received: true, status: transactionStatus });
+    if (!isSuccessStatus) {
+      return NextResponse.json(
+        isSnapRequest
+          ? { responseCode: '2005600', responseMessage: 'Successful' }
+          : { received: true, status: payload.transaction?.status || 'IGNORED' }
+      );
     }
 
     const supabaseAdmin = getSupabaseAdmin();
@@ -122,23 +211,34 @@ export async function POST(request: Request) {
 
     const order = orderData as Order;
     if (order.payment_status === 'PAID') {
-      return NextResponse.json({
-        received: true,
-        message: 'Order already processed',
-      });
+      return NextResponse.json(
+        isSnapRequest
+          ? { responseCode: '2005600', responseMessage: 'Successful' }
+          : { received: true, message: 'Order already processed' }
+      );
     }
 
-    // 3. Update status order ke PAID dan pastikan tidak ada error database
-    const { error: updateError } = await supabaseAdmin
+    const paidAtIso = new Date().toISOString();
+    const { data: updatedRows, error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         payment_status: 'PAID',
-        paid_at: new Date().toISOString(),
+        paid_at: paidAtIso,
       })
-      .eq('id', order.id);
+      .eq('id', order.id)
+      .eq('payment_status', 'PENDING')
+      .select('*');
 
     if (updateError) {
       throw new Error(`Gagal memperbarui status order: ${updateError.message}`);
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      return NextResponse.json(
+        isSnapRequest
+          ? { responseCode: '2005600', responseMessage: 'Successful' }
+          : { received: true, message: 'Order already processed concurrently' }
+      );
     }
 
     const dbOrderItems = (order.order_items || []) as OrderItem[];
@@ -217,6 +317,13 @@ export async function POST(request: Request) {
         `📦 *Produk:*\n${itemsSummary || '-'}\n\n` +
         `📨 *Status Email:* ${emailStatusNote}`
     );
+
+    if (isSnapRequest) {
+      return NextResponse.json({
+        responseCode: '2005600',
+        responseMessage: 'Successful',
+      });
+    }
 
     return NextResponse.json({
       received: true,

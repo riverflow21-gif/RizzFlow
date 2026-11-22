@@ -108,10 +108,10 @@ function checkClientEmailFormat(raw: string): {
 }
 
 /**
- * Memuat skrip resmi DOKU Checkout Pop-up Overlay (jokul-checkout-1.0.0.js)
- * agar QRIS tampil langsung sebagai pop-up di atas halaman web RizzFlow sendiri.
+ * Cadangan pop-up pembayaran jika URL pembayaran berupa link halaman (http/https).
+ * Jika Direct API QRIS sudah aktif, kode barcode langsung tampil di halaman RizzFlow sendiri.
  */
-function openDokuPopupOverlay(paymentUrl: string): Promise<boolean> {
+function openPaymentPopupOverlay(paymentUrl: string): Promise<boolean> {
   return new Promise((resolve) => {
     const win = window as unknown as {
       loadJokulCheckout?: (url: string) => void;
@@ -180,7 +180,7 @@ export default function CheckoutPage() {
   const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
-  // Fungsi pengecekan status pesanan langsung ke backend & DOKU
+  // Fungsi pengecekan status pesanan langsung ke server backend
   const fetchOrderStatus = useCallback(async (invoiceNumber: string) => {
     try {
       const res = await fetch(
@@ -204,7 +204,7 @@ export default function CheckoutPage() {
     return null;
   }, []);
 
-  // Muat keranjang & cek apakah URL membawa ?invoice=INV-... (setelah kembali dari bayar)
+  // Muat keranjang & cek apakah URL membawa ?invoice=INV-...
   useEffect(() => {
     const init = async () => {
       try {
@@ -256,7 +256,7 @@ export default function CheckoutPage() {
     return () => clearInterval(timerId);
   }, [activeOrder]);
 
-  // Auto-buka Pop-up Overlay DOKU tepat di atas halaman ini saat order baru dibuat
+  // Jika URL pembayaran berupa link http (fallback), buka pop-up otomatis di atas halaman ini
   useEffect(() => {
     if (
       activeOrder &&
@@ -266,11 +266,11 @@ export default function CheckoutPage() {
       !hasAutoOpenedPopupRef.current
     ) {
       hasAutoOpenedPopupRef.current = true;
-      openDokuPopupOverlay(activeOrder.qris_string);
+      openPaymentPopupOverlay(activeOrder.qris_string);
     }
   }, [activeOrder]);
 
-  // Polling otomatis setiap 4 detik (langsung verifikasi ke server DOKU)
+  // Polling otomatis setiap 4 detik untuk deteksi pembayaran lunas
   useEffect(() => {
     if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
 
@@ -377,7 +377,6 @@ export default function CheckoutPage() {
         localStorage.removeItem(CART_STORAGE_KEY);
         setCart([]);
       } else {
-        // Simpan invoice di URL agar aman jika halaman di-refresh
         const nextUrl = `/checkout?invoice=${encodeURIComponent(
           data.order.invoice_number
         )}`;
@@ -392,6 +391,10 @@ export default function CheckoutPage() {
     }
   };
 
+  /**
+   * Menyimpan kode QRIS sebagai gambar PNG tajam berlatar putih
+   * agar langsung terbaca saat diunggah ke galeri GoPay, DANA, OVO, ShopeePay, dan M-Banking.
+   */
   const handleDownloadQrisImage = () => {
     if (!activeOrder || !qrisBoxRef.current) return;
     const svgEl = qrisBoxRef.current.querySelector('svg');
@@ -624,7 +627,7 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                {/* AREA TAMPILAN QRIS (POP-UP RESMI DOKU DI HALAMAN INI ATAU QR LANGSUNG) */}
+                {/* AREA TAMPILAN QRIS BERSIH DENGAN DESAIN RIZZFLOW SENDIRI */}
                 <div className="w-full space-y-3">
                   {activeOrder.qris_string &&
                   activeOrder.qris_string.startsWith('http') ? (
@@ -634,10 +637,10 @@ export default function CheckoutPage() {
                       </div>
                       <div className="space-y-1">
                         <h2 className="text-sm sm:text-base font-extrabold text-[#0F2A1D]">
-                          Pop-up Kode QRIS Resmi Siap Dipindai
+                          Kode QRIS Pembayaran Siap Dipindai
                         </h2>
                         <p className="text-xs text-[#375534] leading-relaxed">
-                          Jendela QRIS resmi DOKU (lengkap dengan tombol simpan QRIS) tampil langsung di atas halaman ini. Jika jendela tertutup, tekan tombol hijau di bawah.
+                          Jendela kode QRIS tampil langsung di atas halaman ini. Jika jendela tertutup, tekan tombol di bawah untuk menampilkannya kembali.
                         </p>
                       </div>
 
@@ -646,7 +649,7 @@ export default function CheckoutPage() {
                         whileTap={{ scale: 0.96 }}
                         onClick={() => {
                           if (activeOrder.qris_string) {
-                            openDokuPopupOverlay(activeOrder.qris_string);
+                            openPaymentPopupOverlay(activeOrder.qris_string);
                           }
                         }}
                         className="w-full py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-md transition-colors"
@@ -665,7 +668,7 @@ export default function CheckoutPage() {
                         {isCheckingStatusNow ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Mengecek Pembayaran ke DOKU...</span>
+                            <span>Memverifikasi Pembayaran...</span>
                           </>
                         ) : (
                           <>
@@ -676,16 +679,21 @@ export default function CheckoutPage() {
                       </motion.button>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
+                    <div className="space-y-3.5">
+                      <div className="p-5 rounded-[28px] bg-[#E3EED4]/60 border border-[#6B9071]/50 inline-flex flex-col items-center mx-auto gap-3">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0F2A1D] text-[#E3EED4] text-[11px] font-extrabold">
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>QRIS Pembayaran Resmi</span>
+                        </div>
+
                         <div
                           ref={qrisBoxRef}
-                          className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs"
+                          className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/70 shadow-xs"
                         >
                           {activeOrder.qris_string ? (
                             React.createElement(QRCodeSVG, {
                               value: activeOrder.qris_string,
-                              size: 220,
+                              size: 225,
                             })
                           ) : (
                             <div className="w-48 h-48 flex items-center justify-center text-xs text-[#6B9071]">
@@ -693,10 +701,14 @@ export default function CheckoutPage() {
                             </div>
                           )}
                         </div>
+
+                        <span className="text-[11px] font-bold text-[#375534]">
+                          Scan dengan GoPay, DANA, OVO, ShopeePay &amp; M-Banking
+                        </span>
                       </div>
 
                       {activeOrder.qris_string && (
-                        <div>
+                        <div className="space-y-2.5">
                           <motion.button
                             type="button"
                             whileTap={{ scale: 0.96 }}
@@ -716,6 +728,28 @@ export default function CheckoutPage() {
                               </>
                             )}
                           </motion.button>
+
+                          {!isSimulationMode && (
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.96 }}
+                              disabled={isCheckingStatusNow}
+                              onClick={handleManualCheckStatus}
+                              className="w-full py-3 px-5 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071] font-extrabold text-xs inline-flex items-center justify-center gap-2 transition-colors"
+                            >
+                              {isCheckingStatusNow ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <span>Memverifikasi Pembayaran...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Saya Sudah Bayar — Cek Status Sekarang</span>
+                                </>
+                              )}
+                            </motion.button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -913,7 +947,9 @@ export default function CheckoutPage() {
                 <div className="border-t border-[#AEC3B0]/50 pt-2 flex justify-between items-baseline text-sm font-extrabold text-[#0F2A1D]">
                   <span>Total Bayar</span>
                   <span className="text-lg">
-                    {finalAmount === 0 ? 'Gratis (Rp0)' : formatRupiah(finalAmount)}
+                    {finalAmount === 0
+                      ? 'Gratis (Rp0)'
+                      : formatRupiah(finalAmount)}
                   </span>
                 </div>
               </div>
@@ -937,7 +973,7 @@ export default function CheckoutPage() {
                     <span>
                       {finalAmount === 0
                         ? 'Mengirim Produk Gratis...'
-                        : 'Menyiapkan Pop-up QRIS...'}
+                        : 'Menyiapkan Kode QRIS...'}
                     </span>
                   </>
                 ) : (

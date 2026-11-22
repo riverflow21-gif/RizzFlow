@@ -197,8 +197,8 @@ export async function POST(request: Request) {
 
     const rawAfterDiscount = Math.max(0, subtotalAmount - discountAmount);
     const isFreeOrder = rawAfterDiscount === 0;
-    // Jika 100% gratis (Rp0), tidak perlu tagih Rp1.000; jika berbayar, minimal QRIS Rp1.000
-    const finalAmount = isFreeOrder ? 0 : Math.max(1000, rawAfterDiscount);
+    // Jika 100% gratis (Rp0), tidak perlu tagih Rp1.000; jika berbayar, minimal QRIS Rp1
+    const finalAmount = isFreeOrder ? 0 : Math.max(1, rawAfterDiscount);
 
     const invoiceNumber = `INV-${Date.now()}-${Math.floor(
       100 + Math.random() * 900
