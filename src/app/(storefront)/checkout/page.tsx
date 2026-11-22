@@ -17,6 +17,7 @@ import {
   Sparkles,
   ShoppingBag,
   Download,
+  RefreshCw,
 } from 'lucide-react';
 import { CartItem, Order } from '@/types';
 import {
@@ -172,12 +173,13 @@ export default function CheckoutPage() {
   const [activeOrder, setActiveOrder] = useState(null as NullableOrder);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
+  const [isVerifyingManually, setIsVerifyingManually] = useState(false);
+  const [verifyNotice, setVerifyNotice] = useState(null as NullableString);
   const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
   /**
    * Mengecek status pembayaran ke backend secara senyap tanpa me-reset timer.
-   * Hanya memperbarui state jika data order baru dimuat atau status berubah (misal PENDING -> PAID).
    */
   const fetchOrderStatus = useCallback(
     async (invoiceNumber: string, forceSet = false) => {
@@ -206,6 +208,7 @@ export default function CheckoutPage() {
             });
 
             if (latestOrder.payment_status === 'PAID') {
+              setVerifyNotice(null);
               localStorage.removeItem(CART_STORAGE_KEY);
               setCart([]);
             }
@@ -291,9 +294,7 @@ export default function CheckoutPage() {
     }
   }, [activeOrder]);
 
-  // VERIFIKASI OTOMATIS PENUH:
-  // 1. Cek otomatis setiap 3 detik (tanpa me-reset interval).
-  // 2. Cek INSTAN (0 detik) begitu pembeli kembali dari GoPay/DANA/M-Banking ke Chrome/Safari!
+  // Verifikasi Otomatis: tetap berjalan setiap 3 detik + cek instan saat kembali ke tab/browser
   useEffect(() => {
     if (!activeInvoice || activeStatus !== 'PENDING') return;
 
@@ -318,6 +319,22 @@ export default function CheckoutPage() {
       window.removeEventListener('online', triggerInstantCheck);
     };
   }, [activeInvoice, activeStatus, fetchOrderStatus]);
+
+  // Tombol Verifikasi Pembayaran Cepat (Manual Trigger)
+  const handleManualVerifyPayment = async () => {
+    if (!activeOrder) return;
+    setIsVerifyingManually(true);
+    setVerifyNotice(null);
+
+    const updated = await fetchOrderStatus(activeOrder.invoice_number, true);
+    if (!updated || updated.payment_status !== 'PAID') {
+      setVerifyNotice(
+        'Pembayaran belum terdeteksi dari bank/e-wallet. Jika baru saja membayar, tunggu beberapa detik lalu tekan lagi.'
+      );
+    }
+
+    setIsVerifyingManually(false);
+  };
 
   const handleValidatePromo = async () => {
     const cleanCode = promoInput.trim().toUpperCase();
@@ -365,6 +382,7 @@ export default function CheckoutPage() {
     if (cart.length === 0) return;
 
     setCheckoutError(null);
+    setVerifyNotice(null);
 
     const emailValidation = checkClientEmailFormat(customerEmail);
     if (!emailValidation.valid) {
@@ -598,7 +616,7 @@ export default function CheckoutPage() {
                   <CheckCircle2 className="w-9 h-9 text-[#375534]" />
                 </div>
                 <span className="inline-block px-3.5 py-1 rounded-full bg-[#E3EED4] text-[#0F2A1D] text-xs font-extrabold">
-                  Pembayaran Berhasil Terverifikasi Otomatis!
+                  Pembayaran Berhasil Terverifikasi!
                 </span>
                 <h1 className="text-2xl font-extrabold text-[#0F2A1D]">
                   Terima Kasih Atas Pembelianmu
@@ -654,18 +672,18 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                {/* INDIKATOR VERIFIKASI OTOMATIS (TANPA PERLU PENCET TOMBOL) */}
+                {/* INDIKATOR VERIFIKASI OTOMATIS AKTIF */}
                 <div className="px-4 py-2.5 rounded-2xl bg-[#E3EED4]/75 border border-[#6B9071]/50 inline-flex items-center justify-center gap-2 text-xs font-bold text-[#0F2A1D]">
                   <span className="relative flex h-2.5 w-2.5 shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#375534] opacity-75" />
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#0F2A1D]" />
                   </span>
                   <span>
-                    Verifikasi otomatis aktif — produk langsung terkirim setelah bayar
+                    Verifikasi otomatis berjalan — produk langsung terkirim setelah bayar
                   </span>
                 </div>
 
-                {/* AREA TAMPILAN QRIS BERSIH DENGAN DESAIN RIZZFLOW SENDIRI */}
+                {/* AREA TAMPILAN QRIS */}
                 <div className="w-full space-y-3">
                   {activeOrder.qris_string &&
                   activeOrder.qris_string.startsWith('http') ? (
@@ -750,10 +768,45 @@ export default function CheckoutPage() {
                       )}
                     </div>
                   )}
+
+                  {/* TOMBOL VERIFIKASI PEMBAYARAN LEBIH CEPAT */}
+                  {!isSimulationMode && (
+                    <div className="pt-2 space-y-1.5">
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        disabled={isVerifyingManually}
+                        onClick={handleManualVerifyPayment}
+                        className="w-full py-3.5 px-5 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border-2 border-[#375534] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 transition-colors"
+                      >
+                        {isVerifyingManually ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-[#375534]" />
+                            <span>Memverifikasi Pembayaran...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 text-[#375534]" />
+                            <span>Verifikasi Pembayaran</span>
+                          </>
+                        )}
+                      </motion.button>
+
+                      <p className="text-[11px] font-semibold text-[#375534]">
+                        Tekan tombol ini untuk verifikasi pembayaran lebih cepat
+                      </p>
+
+                      {verifyNotice && (
+                        <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-800">
+                          {verifyNotice}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <p className="text-xs text-[#6B9071] max-w-sm mx-auto leading-relaxed">
-                  Tidak perlu menekan tombol konfirmasi. Begitu pembayaranmu berhasil di aplikasi E-Wallet atau M-Banking, halaman ini langsung berubah Lunas dan file otomatis masuk ke emailmu.
+                  Setelah selesai membayar via GoPay, DANA, OVO, ShopeePay, atau M-Banking, halaman ini akan memperbarui status menjadi Lunas dan file otomatis masuk ke emailmu.
                 </p>
 
                 {isSimulationMode && (
