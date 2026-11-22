@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
@@ -17,7 +17,7 @@ import {
   Sparkles,
   ShoppingBag,
   Download,
-  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { CartItem, Order } from '@/types';
 import {
@@ -107,8 +107,59 @@ function checkClientEmailFormat(raw: string): {
   return { valid: true, errorText: '' };
 }
 
+/**
+ * Memuat skrip resmi DOKU Checkout Pop-up Overlay (jokul-checkout-1.0.0.js)
+ * agar QRIS tampil langsung sebagai pop-up di atas halaman web RizzFlow sendiri.
+ */
+function openDokuPopupOverlay(paymentUrl: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const win = window as unknown as {
+      loadJokulCheckout?: (url: string) => void;
+    };
+
+    if (typeof win.loadJokulCheckout === 'function') {
+      win.loadJokulCheckout(paymentUrl);
+      resolve(true);
+      return;
+    }
+
+    const isSandbox = paymentUrl.includes('sandbox');
+    const scriptSrc = isSandbox
+      ? 'https://sandbox.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js'
+      : 'https://jokul.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js';
+
+    const existing = document.querySelector(`script[src="${scriptSrc}"]`);
+    if (existing) {
+      setTimeout(() => {
+        if (typeof win.loadJokulCheckout === 'function') {
+          win.loadJokulCheckout(paymentUrl);
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      }, 400);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = scriptSrc;
+    script.async = true;
+    script.onload = () => {
+      if (typeof win.loadJokulCheckout === 'function') {
+        win.loadJokulCheckout(paymentUrl);
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    };
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+}
+
 export default function CheckoutPage() {
   const qrisBoxRef = useRef(null as HTMLDivElement | null);
+  const hasAutoOpenedPopupRef = useRef(false);
 
   const [cart, setCart] = useState([] as CartItem[]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -125,24 +176,60 @@ export default function CheckoutPage() {
   const [activeOrder, setActiveOrder] = useState(null as NullableOrder);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
+  const [isCheckingStatusNow, setIsCheckingStatusNow] = useState(false);
   const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
-  useEffect(() => {
+  // Fungsi pengecekan status pesanan langsung ke backend & DOKU
+  const fetchOrderStatus = useCallback(async (invoiceNumber: string) => {
     try {
-      const saved = localStorage.getItem(CART_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as CartItem[];
-        if (Array.isArray(parsed)) {
-          setCart(parsed);
+      const res = await fetch(
+        `/api/orders/${encodeURIComponent(invoiceNumber)}`,
+        { cache: 'no-store' }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { order?: Order };
+        if (data.order) {
+          setActiveOrder(data.order);
+          if (data.order.payment_status === 'PAID') {
+            localStorage.removeItem(CART_STORAGE_KEY);
+            setCart([]);
+          }
+          return data.order;
         }
       }
-    } catch (e) {
-      console.error('Gagal membaca keranjang:', e);
-    } finally {
-      setIsLoaded(true);
+    } catch {
+      // Abaikan gangguan jaringan sementara
     }
+    return null;
   }, []);
+
+  // Muat keranjang & cek apakah URL membawa ?invoice=INV-... (setelah kembali dari bayar)
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const saved = localStorage.getItem(CART_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as CartItem[];
+          if (Array.isArray(parsed)) {
+            setCart(parsed);
+          }
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const invoiceFromUrl = (params.get('invoice') || '').trim();
+        if (invoiceFromUrl) {
+          await fetchOrderStatus(invoiceFromUrl);
+        }
+      } catch (e) {
+        console.error('Gagal memuat checkout:', e);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+
+    init();
+  }, [fetchOrderStatus]);
 
   const subtotalAmount = cart.reduce(
     (acc, item) => acc + item.product.price * item.quantity,
@@ -153,6 +240,7 @@ export default function CheckoutPage() {
   const finalAmount = Math.max(0, subtotalAmount - discountAmount);
   const hasDiscount = discountAmount !== 0;
 
+  // Hitung mundur kedaluwarsa QRIS
   useEffect(() => {
     if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
 
@@ -168,31 +256,37 @@ export default function CheckoutPage() {
     return () => clearInterval(timerId);
   }, [activeOrder]);
 
+  // Auto-buka Pop-up Overlay DOKU tepat di atas halaman ini saat order baru dibuat
+  useEffect(() => {
+    if (
+      activeOrder &&
+      activeOrder.payment_status === 'PENDING' &&
+      activeOrder.qris_string &&
+      activeOrder.qris_string.startsWith('http') &&
+      !hasAutoOpenedPopupRef.current
+    ) {
+      hasAutoOpenedPopupRef.current = true;
+      openDokuPopupOverlay(activeOrder.qris_string);
+    }
+  }, [activeOrder]);
+
+  // Polling otomatis setiap 4 detik (langsung verifikasi ke server DOKU)
   useEffect(() => {
     if (!activeOrder || activeOrder.payment_status !== 'PENDING') return;
 
-    const pollId = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `/api/orders/${encodeURIComponent(activeOrder.invoice_number)}`
-        );
-        if (res.ok) {
-          const data = (await res.json()) as { order?: Order };
-          if (data.order) {
-            setActiveOrder(data.order);
-            if (data.order.payment_status === 'PAID') {
-              localStorage.removeItem(CART_STORAGE_KEY);
-              setCart([]);
-            }
-          }
-        }
-      } catch {
-        // Abaikan gangguan jaringan sementara
-      }
+    const pollId = setInterval(() => {
+      fetchOrderStatus(activeOrder.invoice_number);
     }, 4000);
 
     return () => clearInterval(pollId);
-  }, [activeOrder]);
+  }, [activeOrder, fetchOrderStatus]);
+
+  const handleManualCheckStatus = async () => {
+    if (!activeOrder) return;
+    setIsCheckingStatusNow(true);
+    await fetchOrderStatus(activeOrder.invoice_number);
+    setIsCheckingStatusNow(false);
+  };
 
   const handleValidatePromo = async () => {
     const cleanCode = promoInput.trim().toUpperCase();
@@ -248,6 +342,7 @@ export default function CheckoutPage() {
     }
 
     setIsCreatingOrder(true);
+    hasAutoOpenedPopupRef.current = false;
 
     try {
       const promoToUse =
@@ -277,6 +372,17 @@ export default function CheckoutPage() {
 
       setActiveOrder(data.order);
       setIsSimulationMode(Boolean(data.simulation_mode));
+
+      if (data.order.payment_status === 'PAID') {
+        localStorage.removeItem(CART_STORAGE_KEY);
+        setCart([]);
+      } else {
+        // Simpan invoice di URL agar aman jika halaman di-refresh
+        const nextUrl = `/checkout?invoice=${encodeURIComponent(
+          data.order.invoice_number
+        )}`;
+        window.history.replaceState(null, '', nextUrl);
+      }
     } catch (err) {
       setCheckoutError(
         err instanceof Error ? err.message : 'Terjadi kesalahan saat checkout.'
@@ -286,10 +392,6 @@ export default function CheckoutPage() {
     }
   };
 
-  /**
-   * Mengonversi QRIS SVG menjadi gambar PNG tajam berlatar putih agar mudah
-   * diunggah & di-scan dari Galeri HP (GoPay, DANA, OVO, ShopeePay, M-Banking).
-   */
   const handleDownloadQrisImage = () => {
     if (!activeOrder || !qrisBoxRef.current) return;
     const svgEl = qrisBoxRef.current.querySelector('svg');
@@ -321,11 +423,9 @@ export default function CheckoutPage() {
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          // Latar belakang putih bersih (wajib untuk scan galeri QRIS)
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
 
-          // Banner atas hijau hutan RizzFlow
           ctx.fillStyle = '#0F2A1D';
           ctx.fillRect(0, 0, width, 112);
 
@@ -338,13 +438,11 @@ export default function CheckoutPage() {
           ctx.font = 'bold 17px sans-serif';
           ctx.fillText(`Invoice #${activeOrder.invoice_number}`, width / 2, 84);
 
-          // Gambar kode QRIS dengan margin putih luas di sekelilingnya
           const qrSize = 430;
           const qrX = (width - qrSize) / 2;
           const qrY = 152;
           ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
 
-          // Total nominal pembayaran
           ctx.fillStyle = '#375534';
           ctx.font = 'bold 19px sans-serif';
           ctx.fillText('Total Pembayaran:', width / 2, 640);
@@ -413,17 +511,7 @@ export default function CheckoutPage() {
       });
 
       if (res.ok) {
-        const checkRes = await fetch(
-          `/api/orders/${encodeURIComponent(activeOrder.invoice_number)}`
-        );
-        if (checkRes.ok) {
-          const checkData = (await checkRes.json()) as { order?: Order };
-          if (checkData.order) {
-            setActiveOrder(checkData.order);
-            localStorage.removeItem(CART_STORAGE_KEY);
-            setCart([]);
-          }
-        }
+        await fetchOrderStatus(activeOrder.invoice_number);
       }
     } catch (e) {
       console.error('Gagal simulasi pembayaran:', e);
@@ -536,32 +624,56 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                {/* AREA TAMPILAN QRIS + TOMBOL SIMPAN / DOWNLOAD QRIS */}
+                {/* AREA TAMPILAN QRIS (POP-UP RESMI DOKU DI HALAMAN INI ATAU QR LANGSUNG) */}
                 <div className="w-full space-y-3">
                   {activeOrder.qris_string &&
                   activeOrder.qris_string.startsWith('http') ? (
-                    <div className="space-y-3">
-                      <div className="w-full rounded-[24px] overflow-hidden border-2 border-[#6B9071] bg-white shadow-sm">
-                        <iframe
-                          src={activeOrder.qris_string}
-                          title="Pembayaran QRIS Resmi DOKU"
-                          className="w-full h-[480px] border-0"
-                        />
+                    <div className="p-6 rounded-[28px] bg-[#E3EED4]/55 border border-[#6B9071]/50 space-y-4">
+                      <div className="w-16 h-16 rounded-2xl bg-[#0F2A1D] text-[#E3EED4] flex items-center justify-center mx-auto shadow-sm">
+                        <QrCode className="w-8 h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <h2 className="text-sm sm:text-base font-extrabold text-[#0F2A1D]">
+                          Pop-up Kode QRIS Resmi Siap Dipindai
+                        </h2>
+                        <p className="text-xs text-[#375534] leading-relaxed">
+                          Jendela QRIS resmi DOKU (lengkap dengan tombol simpan QRIS) tampil langsung di atas halaman ini. Jika jendela tertutup, tekan tombol hijau di bawah.
+                        </p>
                       </div>
 
-                      <a
-                        href={activeOrder.qris_string}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm transition-colors"
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        onClick={() => {
+                          if (activeOrder.qris_string) {
+                            openDokuPopupOverlay(activeOrder.qris_string);
+                          }
+                        }}
+                        className="w-full py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-md transition-colors"
                       >
-                        <Download className="w-4 h-4" />
-                        <span>Simpan / Buka Halaman QRIS DOKU</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                      <p className="text-[11px] text-[#6B9071]">
-                        Jika ingin mengunduh gambar QRIS di HP, klik tombol di atas lalu tekan tombol <strong>Download QRIS</strong> yang tersedia di halaman resmi DOKU.
-                      </p>
+                        <QrCode className="w-4 h-4" />
+                        <span>Tampilkan Kode QRIS &amp; Simpan</span>
+                      </motion.button>
+
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        disabled={isCheckingStatusNow}
+                        onClick={handleManualCheckStatus}
+                        className="w-full py-3 px-5 rounded-full bg-white hover:bg-[#E3EED4] text-[#0F2A1D] border border-[#6B9071] font-extrabold text-xs inline-flex items-center justify-center gap-2 transition-colors"
+                      >
+                        {isCheckingStatusNow ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Mengecek Pembayaran ke DOKU...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Saya Sudah Bayar — Cek Status Sekarang</span>
+                          </>
+                        )}
+                      </motion.button>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -611,7 +723,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <p className="text-xs text-[#6B9071] max-w-sm mx-auto leading-relaxed">
-                  Buka aplikasi M-Banking atau E-Wallet (GoPay, OVO, DANA, ShopeePay), pindai atau unggah gambar QRIS yang tersimpan, dan halaman ini akan otomatis memperbarui status menjadi Lunas.
+                  Setelah selesai membayar via GoPay, DANA, OVO, ShopeePay, atau M-Banking, halaman ini otomatis memperbarui status menjadi Lunas dan mengirim file ke emailmu.
                 </p>
 
                 {isSimulationMode && (
@@ -800,7 +912,9 @@ export default function CheckoutPage() {
                 )}
                 <div className="border-t border-[#AEC3B0]/50 pt-2 flex justify-between items-baseline text-sm font-extrabold text-[#0F2A1D]">
                   <span>Total Bayar</span>
-                  <span className="text-lg">{formatRupiah(finalAmount)}</span>
+                  <span className="text-lg">
+                    {finalAmount === 0 ? 'Gratis (Rp0)' : formatRupiah(finalAmount)}
+                  </span>
                 </div>
               </div>
 
@@ -820,13 +934,19 @@ export default function CheckoutPage() {
                 {isCreatingOrder ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Menyiapkan Kode QRIS...</span>
+                    <span>
+                      {finalAmount === 0
+                        ? 'Mengirim Produk Gratis...'
+                        : 'Menyiapkan Pop-up QRIS...'}
+                    </span>
                   </>
                 ) : (
                   <>
                     <QrCode className="w-4 h-4 text-[#E3EED4]" />
                     <span>
-                      Lanjut Pembayaran QRIS ({formatRupiah(finalAmount)})
+                      {finalAmount === 0
+                        ? 'Klaim Produk Gratis Sekarang (Rp0)'
+                        : `Lanjut Pembayaran QRIS (${formatRupiah(finalAmount)})`}
                     </span>
                   </>
                 )}

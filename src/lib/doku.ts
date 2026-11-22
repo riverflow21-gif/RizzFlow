@@ -5,6 +5,8 @@ export interface DokuQrisResult {
   expires_at: string;
 }
 
+const OFFICIAL_VERCEL_URL = 'https://rizzflow-theta.vercel.app';
+
 /**
  * Menghitung potongan diskon kode promo dan total akhir pembayaran.
  */
@@ -34,12 +36,21 @@ function getDokuBaseUrl(): string {
   return isProd ? 'https://api.doku.com' : 'https://api-sandbox.doku.com';
 }
 
-function getAppUrl(): string {
+/**
+ * Memastikan callback_url dan webhook_url SELALU memakai domain publik Vercel
+ * saat jalan di server Production (tidak pernah nyasar ke localhost:3000).
+ */
+function getPublicAppUrl(): string {
   const envUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
-  if (envUrl) {
+  if (
+    envUrl &&
+    envUrl.startsWith('https://') &&
+    !envUrl.includes('localhost') &&
+    !envUrl.includes('127.0.0.1')
+  ) {
     return envUrl.replace(/\/+$/, '');
   }
-  return 'https://rizzflow-theta.vercel.app';
+  return OFFICIAL_VERCEL_URL;
 }
 
 function generateDokuSignature(params: {
@@ -47,20 +58,22 @@ function generateDokuSignature(params: {
   requestId: string;
   requestTimestamp: string;
   requestTarget: string;
-  rawBody: string;
+  rawBody?: string;
   secretKey: string;
 }): string {
-  const digest = crypto
-    .createHash('sha256')
-    .update(params.rawBody, 'utf8')
-    .digest('base64');
-
-  const componentSignature =
+  let componentSignature =
     `Client-Id:${params.clientId}\n` +
     `Request-Id:${params.requestId}\n` +
     `Request-Timestamp:${params.requestTimestamp}\n` +
-    `Request-Target:${params.requestTarget}\n` +
-    `Digest:${digest}`;
+    `Request-Target:${params.requestTarget}`;
+
+  if (params.rawBody !== undefined) {
+    const digest = crypto
+      .createHash('sha256')
+      .update(params.rawBody, 'utf8')
+      .digest('base64');
+    componentSignature += `\nDigest:${digest}`;
+  }
 
   const hmac = crypto
     .createHmac('sha256', params.secretKey)
@@ -80,7 +93,6 @@ export async function createDokuQrisPayment(params: {
   const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
   const expiresAtIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-  // Mode Simulasi (QR Dummy tanpa menghubungi server DOKU)
   if (isSimulation) {
     const dummyQris = `00020101021226660014ID.CO.DOKU.WWW01189360089900000000000215${params.invoiceNumber}520458125303360540${params.amount}5802ID5908RIZZFLOW6007JAKARTA6304ABCD`;
     return {
@@ -96,7 +108,7 @@ export async function createDokuQrisPayment(params: {
   }
 
   const baseUrl = getDokuBaseUrl();
-  const appUrl = getAppUrl();
+  const appUrl = getPublicAppUrl();
   const isProductionServer =
     baseUrl.includes('api.doku.com') && !baseUrl.includes('sandbox');
 
@@ -105,7 +117,6 @@ export async function createDokuQrisPayment(params: {
   const requestTarget =
     (process.env.DOKU_QRIS_ENDPOINT || '').trim() || '/checkout/v1/payment';
 
-  // DOKU mensyaratkan customer.name hanya berupa huruf (tanpa angka/simbol)
   const rawName = (params.customerEmail.split('@')[0] || 'Customer')
     .replace(/[^a-zA-Z\s]/g, '')
     .trim();
@@ -118,22 +129,22 @@ export async function createDokuQrisPayment(params: {
     payment_due_date: 60,
   };
 
-  // QRIS hanya didukung di server DOKU Production (bukan Sandbox)
   if (isProductionServer) {
     paymentConfig.payment_method_types = ['QRIS'];
   }
 
-  const isPublicHttpsUrl =
-    appUrl.startsWith('https://') &&
-    !appUrl.includes('localhost') &&
-    !appUrl.includes('127.0.0.1');
+  const callbackWithInvoice = `${appUrl}/checkout?invoice=${encodeURIComponent(
+    params.invoiceNumber
+  )}`;
 
   const requestBodyObj: Record<string, unknown> = {
     order: {
       amount: Math.round(params.amount),
       invoice_number: params.invoiceNumber,
       currency: 'IDR',
-      callback_url: `${appUrl}/checkout`,
+      callback_url: callbackWithInvoice,
+      callback_url_result: callbackWithInvoice,
+      auto_redirect: true,
     },
     payment: paymentConfig,
     customer: {
@@ -141,14 +152,10 @@ export async function createDokuQrisPayment(params: {
       name: safeCustomerName,
       email: params.customerEmail,
     },
-  };
-
-  // Parameter resmi DOKU Checkout untuk mengarahkan Webhook (hanya jika URL publik HTTPS)
-  if (isPublicHttpsUrl) {
-    requestBodyObj.additional_info = {
+    additional_info: {
       override_notification_url: `${appUrl}/api/webhooks/doku`,
-    };
-  }
+    },
+  };
 
   const rawBody = JSON.stringify(requestBodyObj);
   const signature = generateDokuSignature({
@@ -217,6 +224,70 @@ export async function createDokuQrisPayment(params: {
     qris_string: qrisString,
     expires_at: expiresAtIso,
   };
+}
+
+/**
+ * Mengecek status pembayaran langsung ke server resmi DOKU (Check Status API).
+ * Menjamin pembayaran selalu terdeteksi LUNAS meskipun webhook tertunda.
+ */
+export async function checkDokuOrderStatus(
+  invoiceNumber: string
+): Promise<'SUCCESS' | 'PENDING' | 'FAILED' | 'EXPIRED' | 'UNKNOWN'> {
+  const isSimulation = process.env.DOKU_SIMULATION_MODE === 'true';
+  if (isSimulation) return 'PENDING';
+
+  const clientId = (process.env.DOKU_CLIENT_ID || '').trim();
+  const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
+  if (!clientId || !secretKey) return 'UNKNOWN';
+
+  try {
+    const baseUrl = getDokuBaseUrl();
+    const requestTarget = `/orders/v1/status/${encodeURIComponent(invoiceNumber)}`;
+    const requestId = crypto.randomUUID();
+    const requestTimestamp = new Date().toISOString().slice(0, 19) + 'Z';
+
+    // GET Check Status DOKU tidak memakai Digest
+    const signature = generateDokuSignature({
+      clientId,
+      requestId,
+      requestTimestamp,
+      requestTarget,
+      secretKey,
+    });
+
+    const response = await fetch(`${baseUrl}${requestTarget}`, {
+      method: 'GET',
+      headers: {
+        'Client-Id': clientId,
+        'Request-Id': requestId,
+        'Request-Timestamp': requestTimestamp,
+        Signature: signature,
+      },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) return 'UNKNOWN';
+
+    const data = (await response.json()) as {
+      transaction?: { status?: string };
+      response?: { transaction?: { status?: string } };
+    };
+
+    const status = (
+      data?.transaction?.status ||
+      data?.response?.transaction?.status ||
+      ''
+    ).toUpperCase();
+
+    if (status === 'SUCCESS') return 'SUCCESS';
+    if (status === 'FAILED') return 'FAILED';
+    if (status === 'EXPIRED') return 'EXPIRED';
+    if (status === 'PENDING') return 'PENDING';
+    return 'UNKNOWN';
+  } catch (err) {
+    console.error('Gagal mengecek status DOKU:', err);
+    return 'UNKNOWN';
+  }
 }
 
 export function verifyDokuWebhookSignature(params: {

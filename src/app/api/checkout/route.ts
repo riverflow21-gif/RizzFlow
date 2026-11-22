@@ -3,8 +3,10 @@ import {
   getSupabaseAdmin,
   sendAdminTelegramNotification,
   saveOrderItemsBackup,
+  buildProductDeliveryItems,
 } from '@/lib/supabase';
-import { createDokuQrisPayment } from '@/lib/doku';
+import { createDokuQrisPayment, calculatePromoDiscount } from '@/lib/doku';
+import { sendProductDeliveryEmail, PurchasedFileLink } from '@/lib/email';
 import { Product, PromoCode } from '@/types';
 
 interface CheckoutRequestItem {
@@ -182,23 +184,116 @@ export async function POST(request: Request) {
         const expiresMs = new Date(promo.expires_at).getTime();
 
         if (now >= startsMs && now <= expiresMs) {
-          const rawDiscount = Math.round(
-            (subtotalAmount * promo.discount_percent) / 100
+          const calc = calculatePromoDiscount(
+            subtotalAmount,
+            promo.discount_percent,
+            promo.max_discount_amount
           );
-          discountAmount =
-            promo.max_discount_amount > 0
-              ? Math.min(rawDiscount, promo.max_discount_amount)
-              : rawDiscount;
+          discountAmount = calc.discountAmount;
           appliedPromoCode = promo.code;
         }
       }
     }
 
-    const finalAmount = Math.max(1000, subtotalAmount - discountAmount);
+    const rawAfterDiscount = Math.max(0, subtotalAmount - discountAmount);
+    const isFreeOrder = rawAfterDiscount === 0;
+    // Jika 100% gratis (Rp0), tidak perlu tagih Rp1.000; jika berbayar, minimal QRIS Rp1.000
+    const finalAmount = isFreeOrder ? 0 : Math.max(1000, rawAfterDiscount);
+
     const invoiceNumber = `INV-${Date.now()}-${Math.floor(
       100 + Math.random() * 900
     )}`;
 
+    const productSummary = orderItemsPayload
+      .map((i) => `• ${i.product_title} (x${i.quantity})`)
+      .join('\n');
+
+    // =========================================================================
+    // KASUS 1: PESANAN GRATIS 100% (PROMO 100% / Rp0) -> LANGSUNG PAID & KIRIM EMAIL
+    // =========================================================================
+    if (isFreeOrder) {
+      const nowIso = new Date().toISOString();
+      const { data: insertedFreeOrder, error: freeOrderErr } =
+        await supabaseAdmin
+          .from('orders')
+          .insert({
+            invoice_number: invoiceNumber,
+            customer_email: rawEmail,
+            subtotal_amount: subtotalAmount,
+            discount_amount: discountAmount,
+            final_amount: 0,
+            payment_status: 'PAID',
+            qris_string: null,
+            qris_expires_at: nowIso,
+            paid_at: nowIso,
+          })
+          .select('*')
+          .single();
+
+      if (freeOrderErr || !insertedFreeOrder) {
+        throw new Error(
+          freeOrderErr?.message || 'Gagal menyimpan pesanan gratis.'
+        );
+      }
+
+      const itemsWithOrderId = orderItemsPayload.map((item) => ({
+        order_id: insertedFreeOrder.id,
+        product_id: item.product_id,
+        product_title: item.product_title,
+        quantity: item.quantity,
+        price_at_purchase: item.price_at_purchase,
+      }));
+      await supabaseAdmin.from('order_items').insert(itemsWithOrderId);
+      await saveOrderItemsBackup(invoiceNumber, orderItemsPayload);
+
+      const deliveryFiles: PurchasedFileLink[] = [];
+      for (const item of orderItemsPayload) {
+        const prod = productList.find((p) => p.id === item.product_id);
+        if (!prod) continue;
+        try {
+          const built = await buildProductDeliveryItems({
+            productTitle: item.product_title,
+            quantity: item.quantity,
+            rawFilePath: prod.file_path,
+          });
+          deliveryFiles.push(...built);
+        } catch (err) {
+          console.error('Gagal membuat link produk gratis:', err);
+        }
+      }
+
+      let emailNote = '✅ Email produk berhasil dikirim!';
+      try {
+        await sendProductDeliveryEmail({
+          toEmail: rawEmail,
+          invoiceNumber,
+          totalPaid: 0,
+          files: deliveryFiles,
+        });
+      } catch (mailErr) {
+        const m = mailErr instanceof Error ? mailErr.message : 'SMTP Error';
+        emailNote = `⚠️ Email gagal terkirim (${m})`;
+      }
+
+      await sendAdminTelegramNotification(
+        `🎁 *PESANAN PROMO 100% (GRATIS) SELESAI!*\n\n` +
+          `🧾 Invoice: *#${invoiceNumber}*\n` +
+          `📧 Email: ${rawEmail}\n` +
+          (appliedPromoCode ? `🎟️ Promo: ${appliedPromoCode}\n` : '') +
+          `💰 Total: *Rp0 (Gratis)*\n\n` +
+          `📦 *Produk:*\n${productSummary}\n\n` +
+          `📨 *Status Email:* ${emailNote}`
+      );
+
+      return NextResponse.json({
+        order: insertedFreeOrder,
+        simulation_mode: false,
+      });
+    }
+
+    // =========================================================================
+    // KASUS 2: PESANAN BERBAYAR -> HUBUNGKAN KE DOKU QRIS
+    // =========================================================================
     const qrisResult = await createDokuQrisPayment({
       invoiceNumber,
       amount: finalAmount,
@@ -226,7 +321,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Simpan ke tabel order_items DAN ke backup storage agar 100% aman saat pengiriman email
     const itemsWithOrderId = orderItemsPayload.map((item) => ({
       order_id: insertedOrder.id,
       product_id: item.product_id,
@@ -237,10 +331,6 @@ export async function POST(request: Request) {
 
     await supabaseAdmin.from('order_items').insert(itemsWithOrderId);
     await saveOrderItemsBackup(invoiceNumber, orderItemsPayload);
-
-    const productSummary = orderItemsPayload
-      .map((i) => `• ${i.product_title} (x${i.quantity})`)
-      .join('\n');
 
     await sendAdminTelegramNotification(
       `🛍️ *CHECKOUT PESANAN BARU*\n\n` +
