@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
@@ -16,6 +16,8 @@ import {
   ShieldCheck,
   Sparkles,
   ShoppingBag,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { CartItem, Order } from '@/types';
 import {
@@ -48,11 +50,6 @@ type NullableFeedback = PromoFeedback | null;
 type NullableString = string | null;
 type NullableOrder = Order | null;
 
-/**
- * Validasi email di sisi layar Checkout:
- * Hanya menolak jika kosong atau penulisan domain setelah '@' salah.
- * Mendukung semua domain email (gmail.com, yahoo.com, outlook.com, kampus.ac.id, dll.)
- */
 function checkClientEmailFormat(raw: string): {
   valid: boolean;
   errorText: string;
@@ -111,6 +108,8 @@ function checkClientEmailFormat(raw: string): {
 }
 
 export default function CheckoutPage() {
+  const qrisBoxRef = useRef(null as HTMLDivElement | null);
+
   const [cart, setCart] = useState([] as CartItem[]);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -126,6 +125,7 @@ export default function CheckoutPage() {
   const [activeOrder, setActiveOrder] = useState(null as NullableOrder);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
+  const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(3600);
 
   useEffect(() => {
@@ -241,7 +241,6 @@ export default function CheckoutPage() {
 
     setCheckoutError(null);
 
-    // Hanya validasi email (apakah sudah diisi & apakah domain setelah '@' benar)
     const emailValidation = checkClientEmailFormat(customerEmail);
     if (!emailValidation.valid) {
       setCheckoutError(emailValidation.errorText);
@@ -251,7 +250,6 @@ export default function CheckoutPage() {
     setIsCreatingOrder(true);
 
     try {
-      // Jika pembeli mengetik kode promo di kotak input, kirimkan secara opsional
       const promoToUse =
         appliedPromo && appliedPromo.valid
           ? appliedPromoCode
@@ -285,6 +283,105 @@ export default function CheckoutPage() {
       );
     } finally {
       setIsCreatingOrder(false);
+    }
+  };
+
+  /**
+   * Mengonversi QRIS SVG menjadi gambar PNG tajam berlatar putih agar mudah
+   * diunggah & di-scan dari Galeri HP (GoPay, DANA, OVO, ShopeePay, M-Banking).
+   */
+  const handleDownloadQrisImage = () => {
+    if (!activeOrder || !qrisBoxRef.current) return;
+    const svgEl = qrisBoxRef.current.querySelector('svg');
+    if (!svgEl) return;
+
+    setIsDownloadingQris(true);
+    try {
+      const serializer = new XMLSerializer();
+      let svgText = serializer.serializeToString(svgEl);
+      if (!svgText.includes('xmlns="http://www.w3.org/2000/svg"')) {
+        svgText = svgText.replace(
+          '<svg',
+          '<svg xmlns="http://www.w3.org/2000/svg"'
+        );
+      }
+
+      const svgBlob = new Blob([svgText], {
+        type: 'image/svg+xml;charset=utf-8',
+      });
+      const blobUrl = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.onload = () => {
+        const width = 640;
+        const height = 800;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Latar belakang putih bersih (wajib untuk scan galeri QRIS)
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+
+          // Banner atas hijau hutan RizzFlow
+          ctx.fillStyle = '#0F2A1D';
+          ctx.fillRect(0, 0, width, 112);
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = 'bold 28px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('RizzFlow — QRIS Pembayaran', width / 2, 50);
+
+          ctx.fillStyle = '#E3EED4';
+          ctx.font = 'bold 17px sans-serif';
+          ctx.fillText(`Invoice #${activeOrder.invoice_number}`, width / 2, 84);
+
+          // Gambar kode QRIS dengan margin putih luas di sekelilingnya
+          const qrSize = 430;
+          const qrX = (width - qrSize) / 2;
+          const qrY = 152;
+          ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
+
+          // Total nominal pembayaran
+          ctx.fillStyle = '#375534';
+          ctx.font = 'bold 19px sans-serif';
+          ctx.fillText('Total Pembayaran:', width / 2, 640);
+
+          ctx.fillStyle = '#0F2A1D';
+          ctx.font = 'bold 38px sans-serif';
+          ctx.fillText(formatRupiah(activeOrder.final_amount), width / 2, 692);
+
+          ctx.fillStyle = '#6B9071';
+          ctx.font = '16px sans-serif';
+          ctx.fillText(
+            'Scan via GoPay, DANA, OVO, ShopeePay, atau M-Banking',
+            width / 2,
+            748
+          );
+
+          const pngUrl = canvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          link.href = pngUrl;
+          link.download = `QRIS-RizzFlow-${activeOrder.invoice_number}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        URL.revokeObjectURL(blobUrl);
+        setIsDownloadingQris(false);
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        setIsDownloadingQris(false);
+      };
+
+      img.src = blobUrl;
+    } catch {
+      setIsDownloadingQris(false);
     }
   };
 
@@ -439,7 +536,8 @@ export default function CheckoutPage() {
                   </p>
                 </div>
 
-                <div className="w-full">
+                {/* AREA TAMPILAN QRIS + TOMBOL SIMPAN / DOWNLOAD QRIS */}
+                <div className="w-full space-y-3">
                   {activeOrder.qris_string &&
                   activeOrder.qris_string.startsWith('http') ? (
                     <div className="space-y-3">
@@ -447,39 +545,73 @@ export default function CheckoutPage() {
                         <iframe
                           src={activeOrder.qris_string}
                           title="Pembayaran QRIS Resmi DOKU"
-                          className="w-full h-[460px] border-0"
+                          className="w-full h-[480px] border-0"
                         />
                       </div>
+
                       <a
                         href={activeOrder.qris_string}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#E3EED4] hover:bg-[#375534] text-[#0F2A1D] hover:text-white text-xs font-extrabold transition-colors"
+                        className="w-full py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm transition-colors"
                       >
-                        <QrCode className="w-4 h-4" />
-                        <span>Buka Halaman QRIS di Tab Baru (Jika Belum Muncul)</span>
+                        <Download className="w-4 h-4" />
+                        <span>Simpan / Buka Halaman QRIS DOKU</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
                       </a>
+                      <p className="text-[11px] text-[#6B9071]">
+                        Jika ingin mengunduh gambar QRIS di HP, klik tombol di atas lalu tekan tombol <strong>Download QRIS</strong> yang tersedia di halaman resmi DOKU.
+                      </p>
                     </div>
                   ) : (
-                    <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
-                      <div className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs">
-                        {activeOrder.qris_string ? (
-                          React.createElement(QRCodeSVG, {
-                            value: activeOrder.qris_string,
-                            size: 210,
-                          })
-                        ) : (
-                          <div className="w-48 h-48 flex items-center justify-center text-xs text-[#6B9071]">
-                            QRIS tidak tersedia
-                          </div>
-                        )}
+                    <div className="space-y-3">
+                      <div className="p-5 rounded-[28px] bg-[#E3EED4]/55 border border-[#AEC3B0] inline-block mx-auto">
+                        <div
+                          ref={qrisBoxRef}
+                          className="bg-white p-4 rounded-2xl border border-[#AEC3B0]/60 shadow-xs"
+                        >
+                          {activeOrder.qris_string ? (
+                            React.createElement(QRCodeSVG, {
+                              value: activeOrder.qris_string,
+                              size: 220,
+                            })
+                          ) : (
+                            <div className="w-48 h-48 flex items-center justify-center text-xs text-[#6B9071]">
+                              QRIS tidak tersedia
+                            </div>
+                          )}
+                        </div>
                       </div>
+
+                      {activeOrder.qris_string && (
+                        <div>
+                          <motion.button
+                            type="button"
+                            whileTap={{ scale: 0.96 }}
+                            disabled={isDownloadingQris}
+                            onClick={handleDownloadQrisImage}
+                            className="w-full py-3.5 px-5 rounded-full bg-[#0F2A1D] hover:bg-[#375534] text-[#E3EED4] font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-sm transition-colors"
+                          >
+                            {isDownloadingQris ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Menyiapkan Gambar QRIS...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download className="w-4 h-4" />
+                                <span>Simpan Gambar QRIS (.PNG)</span>
+                              </>
+                            )}
+                          </motion.button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
 
                 <p className="text-xs text-[#6B9071] max-w-sm mx-auto leading-relaxed">
-                  Buka aplikasi M-Banking atau E-Wallet (GoPay, OVO, DANA, ShopeePay), pindai kode QRIS di atas, dan halaman ini akan otomatis memperbarui status menjadi Lunas.
+                  Buka aplikasi M-Banking atau E-Wallet (GoPay, OVO, DANA, ShopeePay), pindai atau unggah gambar QRIS yang tersimpan, dan halaman ini akan otomatis memperbarui status menjadi Lunas.
                 </p>
 
                 {isSimulationMode && (
@@ -604,7 +736,6 @@ export default function CheckoutPage() {
                 </p>
               </div>
 
-              {/* Input Kode Promo — 100% Opsional */}
               <div>
                 <label className="block text-xs font-extrabold text-[#0F2A1D] mb-1.5">
                   Kode Promo Diskon (Opsional — Kosongkan Jika Tidak Ada)

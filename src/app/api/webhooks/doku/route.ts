@@ -27,7 +27,7 @@ function checkDokuSignature(params: {
   rawBody: string;
   signatureHeader: string;
 }): boolean {
-  const secretKey = process.env.DOKU_SECRET_KEY || '';
+  const secretKey = (process.env.DOKU_SECRET_KEY || '').trim();
   if (!secretKey) return false;
 
   const digest = crypto
@@ -55,16 +55,28 @@ function checkDokuSignature(params: {
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
-    const clientId = request.headers.get('Client-Id') || '';
-    const requestId = request.headers.get('Request-Id') || '';
-    const requestTimestamp = request.headers.get('Request-Timestamp') || '';
-    const signatureHeader = request.headers.get('Signature') || '';
+    const clientId = (request.headers.get('Client-Id') || '').trim();
+    const requestId = (request.headers.get('Request-Id') || '').trim();
+    const requestTimestamp = (
+      request.headers.get('Request-Timestamp') || ''
+    ).trim();
+    const signatureHeader = (request.headers.get('Signature') || '').trim();
 
     const isSimulationMode = process.env.DOKU_SIMULATION_MODE === 'true';
     const isSimulationBypass =
       isSimulationMode && signatureHeader === 'SIMULATION_BYPASS';
 
     if (!isSimulationBypass) {
+      // 1. Validasi Client-Id harus cocok dengan akun DOKU kita
+      const configuredClientId = (process.env.DOKU_CLIENT_ID || '').trim();
+      if (!configuredClientId || clientId !== configuredClientId) {
+        return NextResponse.json(
+          { error: 'Invalid DOKU Client ID' },
+          { status: 401 }
+        );
+      }
+
+      // 2. Validasi Signature HMAC-SHA256
       const isValid = checkDokuSignature({
         clientId,
         requestId,
@@ -92,6 +104,7 @@ export async function POST(request: Request) {
       );
     }
 
+    // Hanya proses jika status transaksi benar-benar SUCCESS
     if (transactionStatus !== 'SUCCESS') {
       return NextResponse.json({ received: true, status: transactionStatus });
     }
@@ -115,13 +128,18 @@ export async function POST(request: Request) {
       });
     }
 
-    await supabaseAdmin
+    // 3. Update status order ke PAID dan pastikan tidak ada error database
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         payment_status: 'PAID',
         paid_at: new Date().toISOString(),
       })
       .eq('id', order.id);
+
+    if (updateError) {
+      throw new Error(`Gagal memperbarui status order: ${updateError.message}`);
+    }
 
     const dbOrderItems = (order.order_items || []) as OrderItem[];
     const backupItems = await getOrderItemsBackup(order.invoice_number);
@@ -184,7 +202,7 @@ export async function POST(request: Request) {
       const errMsg =
         mailErr instanceof Error ? mailErr.message : 'Error SMTP Gmail';
       console.error('Gagal mengirim email produk:', errMsg);
-      emailStatusNote = `⚠️ Email GAGAL terkirim (${errMsg}). Pastikan App Password 16 Digit untuk email pengirim sudah diisi di Pengaturan Admin!`;
+      emailStatusNote = `⚠️ Email GAGAL terkirim (${errMsg}).`;
     }
 
     const itemsSummary = effectiveItems
