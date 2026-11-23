@@ -3,23 +3,25 @@ import type { MetadataRoute } from 'next';
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'RizzFlow Admin & Store',
-    short_name: 'RizzFlow Admin',
-    description: 'Aplikasi Pengelola Toko Digital & Layanan Langganan RizzFlow',
+    short_name: 'RizzFlow',
+    description: 'Toko Produk Digital Instan & Layanan Kustom RizzFlow',
     start_url: '/admin',
     display: 'standalone',
-    background_color: '#FFFFFF',
-    theme_color: '#10B981',
+    background_color: '#0F2A1D',
+    theme_color: '#0F2A1D',
     orientation: 'portrait',
     icons: [
       {
-        src: '/logo.jpg',
-        sizes: '192x192',
-        type: 'image/jpeg',
+        src: '/logo-app.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any',
       },
       {
-        src: '/logo.jpg',
+        src: '/icon',
         sizes: '512x512',
-        type: 'image/jpeg',
+        type: 'image/png',
+        purpose: 'any',
       },
     ],
   };

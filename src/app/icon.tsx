@@ -3,8 +3,8 @@ import fs from 'fs';
 import path from 'path';
 
 export const size = {
-  width: 128,
-  height: 128,
+  width: 512,
+  height: 512,
 };
 
 export const contentType = 'image/png';
@@ -30,13 +30,13 @@ export default function Icon() {
           <img
             src={base64Logo}
             alt="RizzFlow"
-            width="128"
-            height="128"
+            width="512"
+            height="512"
             style={{
-              width: '128px',
-              height: '128px',
+              width: '512px',
+              height: '512px',
               objectFit: 'cover',
-              borderRadius: '32px', // Bentuk Kotak Tumpul (Rounded Square)
+              borderRadius: '115px',
             }}
           />
         </div>
@@ -51,12 +51,12 @@ export default function Icon() {
             width: '100%',
             height: '100%',
             background: '#0F2A1D',
-            borderRadius: '32px',
+            borderRadius: '115px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#E3EED4',
-            fontSize: 64,
+            fontSize: 220,
             fontWeight: 800,
           }}
         >

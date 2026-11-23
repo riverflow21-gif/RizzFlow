@@ -7,7 +7,7 @@ export type AdminTab =
 
 export type ServicesSubTab = 'CUSTOM_ORDERS' | 'INBOX_MESSAGES';
 
-export const ADMIN_LOGO_PATH = '/logo.jpg?v=4';
+export const ADMIN_LOGO_PATH = '/logo-app.svg?v=5';
 
 export interface FeedbackBanner {
   type: 'success' | 'error';
